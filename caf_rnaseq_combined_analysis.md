@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-06-26 23:45:01
+2022-06-27 01:02:20
 
 -   [Introduction](#introduction)
     -   [References](#references)
@@ -36,8 +36,71 @@ Agreement.
 
 The following summarises the data obtained:
 
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 30%" />
+<col style="width: 30%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Subtype</th>
+<th>Total samples</th>
+<th>Studies (Samples)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>S1</td>
+<td>28</td>
+<td><ul>
+<li>EGAD00001003808 (16)</li>
+<li>EGAD00001005744 (5)</li>
+<li>EGAD00001006144 (7)</li>
+</ul></td>
+<td>3808 has 12xJuxta-tumor 5744 5 samples from LN Sorting vs
+spreading</td>
+</tr>
+<tr class="even">
+<td>S2</td>
+<td>0</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr class="odd">
+<td>S3</td>
+<td>14</td>
+<td><ul>
+<li>EGAD00001004810 (14)</li>
+</ul></td>
+<td>4810 has 11xJuxta-tumor Ovarian</td>
+</tr>
+<tr class="even">
+<td>S4</td>
+<td>15</td>
+<td><ul>
+<li>EGAD00001003808 (10)</li>
+<li>EGAD00001005744 (5)</li>
+</ul></td>
+<td>3808 has 9xJuxta-tumor 5744 5 samples from LN</td>
+</tr>
+</tbody>
+</table>
+
+With the juxta-tumour data, they got tumour and juxta-tumour data from
+the same patient. However, I have not been able to figure out whether
+they came from the same patient. Could probably use Optitype to
+determine HLA allele - match tumour and juxta tumour.
+
+We also have scRNA-seq data for S1.
+
 The data was processed using nf-core/rnaseq version using the default
 parameters.
+
+We would expect our tumour-associated normal to be most like the S3
+subtype (usually accumulate in juxta-tumours).
 
 ## References
 

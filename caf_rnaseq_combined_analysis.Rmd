@@ -28,7 +28,29 @@ FACS gating strategies can be used to isolate these various subtypes. The Mechta
 
 The following summarises the data obtained:
 
++---------------+---------------+-----------------------+-----------------------+
+| Subtype       | Total samples | Studies (Samples)     |  Notes                |
++===============+===============+=======================+=======================+
+| S1            |  28           | - EGAD00001003808 (16)|3808 has 12xJuxta-tumor|
+|               |               | - EGAD00001005744 (5) |5744 5 samples from LN |
+|               |               | - EGAD00001006144 (7) |Sorting vs spreading   |
++---------------+---------------+-----------------------+-----------------------+
+| S2            | 0             | N/A                   | N/A                   |
+|               |               |                       |                       |
++---------------+---------------+-----------------------+-----------------------+
+| S3            | 14            | - EGAD00001004810 (14)|4810 has 11xJuxta-tumor|
+|               |               |                       |Ovarian                |
++---------------+---------------+-----------------------+-----------------------+
+| S4            | 15            | - EGAD00001003808 (10)|3808 has 9xJuxta-tumor |
+|               |               | - EGAD00001005744 (5) |5744 5 samples from LN |
++---------------+---------------+-----------------------+-----------------------+
+
+With the juxta-tumour data, they got tumour and juxta-tumour data from the same patient. However, I have not been able to figure out whether they came from the same patient. Could probably use Optitype to determine HLA allele - match tumour and juxta tumour.
+
+We also have scRNA-seq data for S1.
 
 The data was processed using nf-core/rnaseq version using the default parameters. 
+
+We would expect our tumour-associated normal to be most like the S3 subtype (usually accumulate in juxta-tumours).
 
 ## References
