@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-06-27 01:02:20
+2022-06-27 01:06:52
 
 -   [Introduction](#introduction)
     -   [References](#references)
@@ -38,10 +38,10 @@ The following summarises the data obtained:
 
 <table>
 <colgroup>
-<col style="width: 20%" />
-<col style="width: 20%" />
-<col style="width: 30%" />
-<col style="width: 30%" />
+<col style="width: 18%" />
+<col style="width: 18%" />
+<col style="width: 27%" />
+<col style="width: 36%" />
 </colgroup>
 <thead>
 <tr class="header">
@@ -60,8 +60,11 @@ The following summarises the data obtained:
 <li>EGAD00001005744 (5)</li>
 <li>EGAD00001006144 (7)</li>
 </ul></td>
-<td>3808 has 12xJuxta-tumor 5744 5 samples from LN Sorting vs
-spreading</td>
+<td><ul>
+<li>3808 has 12xJuxta-tumor</li>
+<li>5744 5 samples from LN</li>
+<li>Sorting vs spreading</li>
+</ul></td>
 </tr>
 <tr class="even">
 <td>S2</td>
@@ -75,7 +78,10 @@ spreading</td>
 <td><ul>
 <li>EGAD00001004810 (14)</li>
 </ul></td>
-<td>4810 has 11xJuxta-tumor Ovarian</td>
+<td><ul>
+<li>4810 has 11xJuxta-tumor</li>
+<li>Ovarian</li>
+</ul></td>
 </tr>
 <tr class="even">
 <td>S4</td>
@@ -84,7 +90,10 @@ spreading</td>
 <li>EGAD00001003808 (10)</li>
 <li>EGAD00001005744 (5)</li>
 </ul></td>
-<td>3808 has 9xJuxta-tumor 5744 5 samples from LN</td>
+<td><ul>
+<li>3808 has 9xJuxta-tumor</li>
+<li>5744 5 samples from LN</li>
+</ul></td>
 </tr>
 </tbody>
 </table>
