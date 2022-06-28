@@ -53,4 +53,101 @@ The data was processed using nf-core/rnaseq version using the default parameters
 
 We would expect our tumour-associated normal to be most like the S3 subtype (usually accumulate in juxta-tumours).
 
+
+## Preparation
+### Create Sample File
+
+Columns will be: Sample, Study, CAF_subtype, Tumor_Juxtatumor
+
+*Here we will be combining data from 5 studies. To begin with, we will only include the metadata available for all studies (except for our unknown CAF subtype label). Breast cancer subtype is only available for certain studies and so is not included at this stage.*
+
+There are also: ovarian cancer samples, EPCAM+ cells, samples prepared by spreading or spreading and samples from lymph nodes. For the time being, I will not consider them.
+
+```{r}
+library(dplyr)
+library(stringr)
+library(biomaRt)
+library(tximport)
+```
+
+```{r read in metadata}
+EGAD_4810 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001004810/delimited_maps/Run_Sample_meta_info.map", sep = ";")
+EGAD_4810_cancers <- str_split_fixed(EGAD_4810$V1, pattern = "=", n = 2)[,2]
+EGAD_4810_keep <- which(EGAD_4810_cancers == "BC")
+EGAD_4810_filtered <- EGAD_4810[EGAD_4810_keep,]
+EGAD_4810_filtered
+EGAD_4810_meta <- data.frame(
+  Sample = str_split_fixed(EGAD_4810_filtered$V4, pattern = "=", n = 2)[,2],
+  Study = "EGAD00001004810",
+  Subtype = "S3",
+  Tumor_JuxtaTumor = tolower(str_split_fixed(EGAD_4810_filtered$V3, pattern = " ", n = 2)[,2]),
+  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon",
+  row.names = 1
+)
+EGAD_4810_meta
+EGAD_3808 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001003808/meta_CAF-S1_S4_BC_47samples.txt", header = T, sep = "\t")
+EGAD_3808
+EGAD_3808_meta <- data.frame(
+  Sample = EGAD_3808$Sample.Name,
+  Study = "EGAD00001003808",
+  Subtype = EGAD_3808$subset,
+  Tumor_JuxtaTumor = EGAD_3808$Type, 
+    directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon",
+  row.names = 1
+)
+EGAD_3808_meta
+EGAD_6144 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001006144/meta_7samples.txt", header = T,sep = "\t")
+EGAD_6144_meta <- data.frame(
+  Sample = paste("CAF_Culture_", EGAD_6144$Sample.Name, sep = ""),
+  Study = "EGAD00001006144",
+  Subtype = "S1",
+  Tumor_JuxtaTumor = "tumor",
+    directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon",
+  row.names = 1
+)
+EGAD_6144_meta
+EGAD_5744 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001005744/metaData_Pelon_et_al.txt", header =T, check.names = F)
+EGAD_5744$Sample.Name <- gsub(pattern = "\\.", replacement = "-", x = EGAD_5744$Sample.Name )
+EGAD_5744_filtered <- EGAD_5744[!(EGAD_5744$subset == "EPCAM+") & (EGAD_5744$Type == "T"),]
+EGAD_5744_meta <- data.frame(
+  Sample = EGAD_5744_filtered$Sample.Name,
+  Study = "EGAD00001005744",
+  Subtype = EGAD_5744_filtered$subset,
+  Tumor_JuxtaTumor = "tumor",
+    directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon",
+  row.names = 1
+)
+EGAD_5744_meta
+barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples.csv", header = T, row.names = "samples", check.names = F)
+barkley_samples_meta <- data.frame(
+  Sample = row.names(barkley_samples),
+  Study = "In-House",
+  Subtype = "Unknown",
+  Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxta-tumor"),
+  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/",
+  row.names = 1
+)
+barkley_samples_meta
+metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
+metadata
+```
+
+### Prepare transcript annotations
+
+```{r}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+```
+
+### Read in files
+
+```{r}
+#basedirs <- c("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon")
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+names(files) <- rownames(metadata)
+file.exists(files)
+#txi.salmon <- tximport(files, type = "salmon", tx2gene = tx2gene)
+```
+
+
 ## References
