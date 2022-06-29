@@ -6,7 +6,7 @@ bibliography: citations.bib
 output: 
   github_document:
      toc: true
-     toc_depth: 2 
+     toc_depth: 3 
 ---
 
 ```{r setup, include=FALSE}
@@ -64,18 +64,25 @@ Columns will be: Sample, Study, CAF_subtype, Tumor_Juxtatumor
 There are also: ovarian cancer samples, EPCAM+ cells, samples prepared by spreading or spreading and samples from lymph nodes. For the time being, I will not consider them.
 
 ```{r}
-library(dplyr)
+suppressPackageStartupMessages(library(dplyr))
 library(stringr)
 library(biomaRt)
-library(tximport)
+suppressPackageStartupMessages(library(tximport))
+library(DT)
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(ggplot2))
+library(cowplot)
+suppressPackageStartupMessages(library(PCAtools))
+library(dplyr)
+suppressPackageStartupMessages(library(SummarizedExperiment))
 ```
 
 ```{r read in metadata}
-EGAD_4810 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001004810/delimited_maps/Run_Sample_meta_info.map", sep = ";")
+EGAD_4810 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001004810/delimited_maps/Run_Sample_meta_info.map", 
+                        sep = ";")
 EGAD_4810_cancers <- str_split_fixed(EGAD_4810$V1, pattern = "=", n = 2)[,2]
 EGAD_4810_keep <- which(EGAD_4810_cancers == "BC")
 EGAD_4810_filtered <- EGAD_4810[EGAD_4810_keep,]
-EGAD_4810_filtered
 EGAD_4810_meta <- data.frame(
   Sample = str_split_fixed(EGAD_4810_filtered$V4, pattern = "=", n = 2)[,2],
   Study = "EGAD00001004810",
@@ -84,9 +91,8 @@ EGAD_4810_meta <- data.frame(
   directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon",
   row.names = 1
 )
-EGAD_4810_meta
-EGAD_3808 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001003808/meta_CAF-S1_S4_BC_47samples.txt", header = T, sep = "\t")
-EGAD_3808
+EGAD_3808 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001003808/meta_CAF-S1_S4_BC_47samples.txt", 
+                        header = T, sep = "\t")
 EGAD_3808_meta <- data.frame(
   Sample = EGAD_3808$Sample.Name,
   Study = "EGAD00001003808",
@@ -95,8 +101,8 @@ EGAD_3808_meta <- data.frame(
     directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon",
   row.names = 1
 )
-EGAD_3808_meta
-EGAD_6144 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001006144/meta_7samples.txt", header = T,sep = "\t")
+EGAD_6144 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001006144/meta_7samples.txt", 
+                        header = T,sep = "\t")
 EGAD_6144_meta <- data.frame(
   Sample = paste("CAF_Culture_", EGAD_6144$Sample.Name, sep = ""),
   Study = "EGAD00001006144",
@@ -105,8 +111,8 @@ EGAD_6144_meta <- data.frame(
     directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon",
   row.names = 1
 )
-EGAD_6144_meta
-EGAD_5744 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001005744/metaData_Pelon_et_al.txt", header =T, check.names = F)
+EGAD_5744 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001005744/metaData_Pelon_et_al.txt", 
+                        header =T, check.names = F)
 EGAD_5744$Sample.Name <- gsub(pattern = "\\.", replacement = "-", x = EGAD_5744$Sample.Name )
 EGAD_5744_filtered <- EGAD_5744[!(EGAD_5744$subset == "EPCAM+") & (EGAD_5744$Type == "T"),]
 EGAD_5744_meta <- data.frame(
@@ -117,8 +123,8 @@ EGAD_5744_meta <- data.frame(
     directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon",
   row.names = 1
 )
-EGAD_5744_meta
-barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples.csv", header = T, row.names = "samples", check.names = F)
+barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples.csv", 
+                            header = T, row.names = "samples", check.names = F)
 barkley_samples_meta <- data.frame(
   Sample = row.names(barkley_samples),
   Study = "In-House",
@@ -127,27 +133,91 @@ barkley_samples_meta <- data.frame(
   directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/",
   row.names = 1
 )
-barkley_samples_meta
-metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
-metadata
+metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
+                             EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
+rownames(metadata) <- gsub(pattern = "-", replacement = "\\.", x = rownames(metadata))
+# drop directory
+metadata$directory <- NULL
+metadata[1:5,]
 ```
 
 ### Prepare transcript annotations
 
 ```{r}
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
-tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+#mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+#tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
 ```
 
 ### Read in files
 
-```{r}
-#basedirs <- c("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon")
-files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
-names(files) <- rownames(metadata)
-file.exists(files)
-#txi.salmon <- tximport(files, type = "salmon", tx2gene = tx2gene)
+```{r get TPM counts}
+EGAD00001004810_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
+EGAD00001004810_tpm <- assays(EGAD00001004810_rds)$abundance
+EGAD00001003808_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
+EGAD00001003808_tpm <- assays(EGAD00001003808_rds)$abundance
+EGAD00001006144_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
+EGAD00001006144_tpm <- assays(EGAD00001006144_rds)$abundance
+EGAD00001005744_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
+EGAD00001005744_tpm <- assays(EGAD00001005744_rds)$abundance
+inhouse_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/salmon.merged.gene_counts.rds")
+inhouse_tpm <- assays(inhouse_rds)$abundance
+samps <- c("4810", "3808", "6144", "5744", "inhouse")
+dfs <- list(EGAD00001004810_tpm, EGAD00001003808_tpm, EGAD00001006144_tpm, EGAD00001005744_tpm, inhouse_tpm)
 ```
 
+The inhouse samples were processed with a different version of nf-core/rnaseq, and so have a different number of genes. Here we test the pairwise overlap of the gene names for all samples 
+
+```{r}
+mat <- matrix(data = rep(0, length(dfs)*length(dfs)), 
+              nrow = length(dfs), ncol = length(dfs), dimnames = list(samps,samps))
+mat
+for (i in 1:length(dfs)){
+  for (j in 1:length(dfs)){
+    mat[i,j] <- length(intersect(rownames(dfs[[i]]), rownames(dfs[[j]])))
+  }
+}
+mat
+```
+
+We want to have the same genes in each matrix
+
+```{r}
+data_combined <- Reduce(function(x, y) merge(x, y, all=TRUE, by="rn", suffixes=c("", ".2")), 
+    lapply(dfs, function(x) data.frame(x, rn = row.names(x))))
+# get rid of genes with any NA
+data_combined <- na.omit(data_combined)
+# get rid of genes not expressed in any samples
+thresh <- 0.0001
+data_combined <- data_combined[rowSums(data_combined[,-1]) > thresh, ]
+data_combined <- data_combined %>% remove_rownames %>% column_to_rownames(var="rn")
+# get rid of X in colnames
+colnames(data_combined) <- gsub(pattern = "X", replacement = "", x = colnames(data_combined))
+# only want to keep samples that we want to analyse - those in the metadata object
+data_combined <- data_combined[,intersect(rownames(metadata), colnames(data_combined))]
+```
+
+For PCA, we want colnames of our `data_combined` object to be the sample names and the rownames of our `metadata` to be the sample names 
+
+
+```{r}
+all(colnames(data_combined) == rownames(metadata))
+```
+
+### PCA
+
+```{r}
+p <- pca(data_combined, metadata = metadata, removeVar = 0.1)
+```
+```{r}
+biplot(p, colby = 'Study', legendPosition = 'top')
+```
+
+```{r}
+eigencorplot(p,metavars = c('Study', 'Subtype', 'Tumor_JuxtaTumor'))
+```
+
+It is not surprising that the first principal component is correlated with the study of origin. There is also a correlation with subtype, but this could also be due to the link with study - different studies tend to have different subtypes.
+
+Next step is to look at batch correction.
 
 ## References
