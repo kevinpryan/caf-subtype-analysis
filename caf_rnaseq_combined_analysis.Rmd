@@ -199,17 +199,17 @@ data_combined <- data_combined[,intersect(rownames(metadata), colnames(data_comb
 ```
 
 ```{r}
-data_combined
-summary(data_combined)
+#data_combined
+#summary(data_combined)
 avgs <- apply(data_combined, MARGIN = 1, mean)
 quants <- quantile(avgs, probs = seq(0,1,0.1))
 #length(avgs[avgs > quants[1] & avgs < quants[10]])
 # get genes in middle 80 percentile in terms of mean expression in an attempt to remove outliers
 genes_80 <- avgs[avgs > quants[1] & avgs < quants[10]]
-genes_80
+#genes_80
 genes_80_names <- intersect(names(genes_80), rownames(data_combined))
 data_combined_filter <- data_combined[genes_80_names,]
-data_combined_filter
+#data_combined_filter
 ```
 
 ```{r}
@@ -245,11 +245,11 @@ Carry out PCA on the filtered data_combined
 p_filt <- pca(data_combined_filter, metadata = metadata, removeVar = 0.1)
 ```
 ```{r}
-biplot(p_filt, colby = 'Study', legendPosition = 'top')
+#biplot(p_filt, colby = 'Study', legendPosition = 'top')
 ```
 
 ```{r}
-hist(data_combined_filter$B86T10)
+#hist(data_combined_filter$B86T10)
 ```
 
 Look for samples with lots of zero expressed genes
@@ -270,7 +270,7 @@ quantile(prop_not_expressed)
 ```{r}
 metadata_with_prop_not_expressed <- metadata %>% mutate(prop_not_exp = prop_not_expressed[intersect(names(prop_not_expressed), rownames(metadata))]) %>% 
                                             mutate(ranked_prop_not_exp = rank(prop_not_exp))
-metadata_with_prop_not_expressed
+#metadata_with_prop_not_expressed
 ```
 
 
@@ -283,7 +283,7 @@ p_filt_remove_outlier <- pca(data_combined_filter_without_unexpressed_greater_90
 ```
 
 ```{r}
-biplot(p_filt_remove_outlier, colby = 'Subtype', legendPosition = 'top')
+#biplot(p_filt_remove_outlier, colby = 'Subtype', legendPosition = 'top')
 ```
 
 ### Use DeSeq2 to normalise data instead
