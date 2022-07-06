@@ -29,7 +29,7 @@ FACS gating strategies can be used to isolate these various subtypes. The Mechta
 The following summarises the data obtained:
 
 +---------------+---------------+-----------------------+-------------------------------+
-| Subtype       | Total samples | Studies (Samples)     |  Notes                        |
+| Subpopulation       | Total samples | Studies (Samples)     |  Notes                        |
 +===============+===============+=======================+===============================+
 | S1            |  28           | - EGAD00001003808 (16)| -  3808 has 12xJuxta-tumor    |
 |               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
@@ -64,7 +64,7 @@ Columns will be: Sample, Study, CAF_subtype, Tumor_Juxtatumor
 
 There are also: ovarian cancer samples, EPCAM+ cells, samples prepared by spreading or spreading and samples from lymph nodes. For the time being, I will not consider them.
 
-```{r message=FALSE}
+```{r message=FALSE, echo=FALSE}
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(stringr))
 library(biomaRt)
@@ -77,6 +77,10 @@ suppressPackageStartupMessages(library(PCAtools))
 library(dplyr)
 suppressPackageStartupMessages(library(SummarizedExperiment))
 library(DESeq2)
+suppressPackageStartupMessages(library(tximeta))
+library(pheatmap)
+library(RColorBrewer)
+library(glmpca)
 ```
 
 ```{r read in metadata}
@@ -129,182 +133,137 @@ barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/refor
                             header = T, row.names = "samples", check.names = F)
 barkley_samples_meta <- data.frame(
   Sample = row.names(barkley_samples),
-  Study = "In-House",
+   Study = "In-House",
   Subtype = "Unknown",
   Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxta-tumor"),
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/",
+  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon",
   row.names = 1
 )
 metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
-rownames(metadata) <- gsub(pattern = "-", replacement = "\\.", x = rownames(metadata))
-# drop directory column
-metadata$directory <- NULL
 metadata[1:5,]
 ```
 
-### Prepare transcript annotations
-
-```{r}
-#mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
-#tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
-```
-
-### First attempt at reading in files
-
-```{r get TPM counts}
-EGAD00001004810_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001004810_tpm <- assays(EGAD00001004810_rds)$abundance
-EGAD00001003808_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001003808_tpm <- assays(EGAD00001003808_rds)$abundance
-EGAD00001006144_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001006144_tpm <- assays(EGAD00001006144_rds)$abundance
-EGAD00001005744_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001005744_tpm <- assays(EGAD00001005744_rds)$abundance
-inhouse_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/salmon.merged.gene_counts.rds")
-inhouse_tpm <- assays(inhouse_rds)$abundance
-samps <- c("4810", "3808", "6144", "5744", "inhouse")
-dfs <- list(EGAD00001004810_tpm, EGAD00001003808_tpm, EGAD00001006144_tpm, EGAD00001005744_tpm, inhouse_tpm)
-```
-
-The inhouse samples were processed with a different version of nf-core/rnaseq, and so have a different number of genes. Here we test the pairwise overlap of the gene names for all samples 
-
-```{r}
-mat <- matrix(data = rep(0, length(dfs)*length(dfs)), 
-              nrow = length(dfs), ncol = length(dfs), dimnames = list(samps,samps))
-mat
-for (i in 1:length(dfs)){
-  for (j in 1:length(dfs)){
-    mat[i,j] <- length(intersect(rownames(dfs[[i]]), rownames(dfs[[j]])))
-  }
-}
-mat
-```
-
-We want to have the same genes in each matrix
-
-```{r}
-data_combined <- Reduce(function(x, y) merge(x, y, all=TRUE, by="rn", suffixes=c("", ".2")), 
-    lapply(dfs, function(x) data.frame(x, rn = row.names(x))))
-# get rid of genes with any NA
-data_combined <- na.omit(data_combined)
-# get rid of genes not expressed in any samples
-thresh <- 0.0001
-data_combined <- data_combined[rowSums(data_combined[,-1]) > thresh, ]
-data_combined <- data_combined %>% remove_rownames %>% column_to_rownames(var="rn")
-# get rid of X in colnames
-colnames(data_combined) <- gsub(pattern = "X", replacement = "", x = colnames(data_combined))
-# only want to keep samples that we want to analyse - those in the metadata object
-data_combined <- data_combined[,intersect(rownames(metadata), colnames(data_combined))]
-```
-
-```{r}
-#data_combined
-#summary(data_combined)
-avgs <- apply(data_combined, MARGIN = 1, mean)
-quants <- quantile(avgs, probs = seq(0,1,0.1))
-#length(avgs[avgs > quants[1] & avgs < quants[10]])
-# get genes in middle 80 percentile in terms of mean expression in an attempt to remove outliers
-genes_80 <- avgs[avgs > quants[1] & avgs < quants[10]]
-#genes_80
-genes_80_names <- intersect(names(genes_80), rownames(data_combined))
-data_combined_filter <- data_combined[genes_80_names,]
-#data_combined_filter
-```
-
-```{r}
-
-```
-
-
-For PCA, we want colnames of our `data_combined` object to be the sample names and the rownames of our `metadata` to be the sample names 
-
-
-```{r}
-all(colnames(data_combined) == rownames(metadata))
-```
-
-### PCA
-
-```{r}
-p <- pca(data_combined, metadata = metadata, removeVar = 0.1)
-```
-```{r}
-biplot(p, colby = 'Study', legendPosition = 'top')
-```
-
-```{r}
-eigencorplot(p,metavars = c('Study', 'Subtype', 'Tumor_JuxtaTumor'))
-```
-
-It is not surprising that the first principal component is correlated with the study of origin. There is also a correlation with subtype, but this could also be due to the link with study - different studies tend to have different subtypes.
-
-Carry out PCA on the filtered data_combined
-
-```{r}
-p_filt <- pca(data_combined_filter, metadata = metadata, removeVar = 0.1)
-```
-```{r}
-#biplot(p_filt, colby = 'Study', legendPosition = 'top')
-```
-
-```{r}
-#hist(data_combined_filter$B86T10)
-```
-
-Look for samples with lots of zero expressed genes
-
-```{r}
-prop_not_expressed <- c()
-ngenes <- nrow(data_combined_filter)
-for (i in 1:ncol(data_combined_filter)){
-  prop_not_expressed[i] <- length(which(data_combined_filter[,i] == 0))/ngenes
-  names(prop_not_expressed)[i] <- colnames(data_combined_filter)[i]
-}
-range(prop_not_expressed)
-quantile(prop_not_expressed)
-# remove samples with >90% genes not expressed
-
-```
-
-```{r}
-metadata_with_prop_not_expressed <- metadata %>% mutate(prop_not_exp = prop_not_expressed[intersect(names(prop_not_expressed), rownames(metadata))]) %>% 
-                                            mutate(ranked_prop_not_exp = rank(prop_not_exp))
-#metadata_with_prop_not_expressed
-```
-
-
-```{r}
-samples_to_remove <- names(which(prop_not_expressed > 0.9))
-data_combined_filter_without_unexpressed_greater_90 <- data_combined_filter %>% dplyr::select(-samples_to_remove)
-metadata_remove_outlier <- metadata[!(rownames(metadata) %in% samples_to_remove),] 
-p_filt_remove_outlier <- pca(data_combined_filter_without_unexpressed_greater_90, metadata = metadata_remove_outlier, removeVar = 0.1)
-
-```
-
-```{r}
-#biplot(p_filt_remove_outlier, colby = 'Subtype', legendPosition = 'top')
-```
-
-### Use DeSeq2 to normalise data instead
+### Read in data with tximeta and create DESeq object
 
 Difficult to mess around with filters etc.
 
 Plan: rerun in house samples with same nfcore version `3.8.1`
 Read in samples with tximport, deseqdataobject etc
 
+
 ```{r}
-#data_combined_matrix <- as.matrix(data_combined)
-#dds <- Deseqdata
-#metadata
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
+                      Subtype = metadata$Subtype, 
+                      Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
+se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+```
+
+
+```{r Apply common filters according to DESeq2 vignette}
+dds <- DESeqDataSet(se, design = ~ Study)
+dim(dds)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dim(dds)
+# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
+X <- 7
+keep <- rowSums(counts(dds) >= 10) >= X
+dds <- dds[keep,]
+dim(dds)
+ntd <- normTransform(dds)
 ```
 
 ```{r}
-#basedirs <- c("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon","/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon")
-#metadata_without_inhouse <- metadata
-#files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+dds <- DESeq(dds)
 ```
 
+
+```{r Create heatmap of 20 genes with highest normalised mean expression}
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds)[,c("Study","Subtype", "Tumor_JuxtaTumor")])
+pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df, show_colnames = F)
+```
+
+From the heatmap, we can see that there are profound batch effects present which must be dealt with.
+
+### Data transformation
+
+There are a number of options to choose from when normalising RNA-seq data, the main ones being:
+ -  Take the log of the data and add a pseudocount.
+ -  Variance stabilizing transformation (Anders and Huber 2010)
+ -  Regularized logarithm transformation (Love, Huber, and Anders 2014)
+
+The log+pseudocount approach tends to mean that lowly expressed genes have more of an effect. *Vst* and *rlog* bring these counts towards a middle amount, making the data more homoskedastic. This allows them to be used in downstream processes which require homoskedastic data (e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes such as ours as it is much faster than *rlog*
+
+
+```{r}
+vsd <- vst(dds, blind = FALSE)
+```
+
+```{r}
+dds <- estimateSizeFactors(dds)
+
+df <- bind_rows(
+  as_data_frame(log2(counts(dds, normalized=TRUE)[, 1:2]+1)) %>%
+         mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"))
+  
+colnames(df)[1:2] <- c("x", "y")  
+
+lvls <- c("log2(x + 1)", "vst")
+df$transformation <- factor(df$transformation, levels=lvls)
+
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+```
+
+There doesn't seem to much of a difference between the two methods of normalisation, only that the lowly expressed genes have been brought up to a minimum of ~4. 
+
+```{r}
+sampleDists <- dist(t(assay(vsd)))
+```
+
+```{r}
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- vsd$Study
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+```
+
+```{r}
+plotPCA(vsd, intgroup = c("Study", "Subtype"))
+```
+
+```{r}
+pcaData <- plotPCA(vsd, intgroup = c("Study", "Subtype"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+```
+
+```{r}
+ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() +
+  ggtitle("PCA with VST data")
+```
+
+```{r}
+gpca <- glmpca(counts(dds), L=2)
+gpca.dat <- gpca$factors
+gpca.dat$Study <- dds$Study
+gpca.dat$Subtype <- dds$Subtype
+```
 
 Next step is to look at batch correction.
 

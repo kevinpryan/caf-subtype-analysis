@@ -1,22 +1,17 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-01 10:29:06
+2022-07-06 18:13:30
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
         -   <a href="#create-sample-file" id="toc-create-sample-file">Create Sample
             File</a>
-        -   <a href="#prepare-transcript-annotations"
-            id="toc-prepare-transcript-annotations">Prepare transcript
-            annotations</a>
-        -   <a href="#first-attempt-at-reading-in-files"
-            id="toc-first-attempt-at-reading-in-files">First attempt at reading in
-            files</a>
-        -   <a href="#pca" id="toc-pca">PCA</a>
         -   <a href="#use-deseq2-to-normalise-data-instead"
             id="toc-use-deseq2-to-normalise-data-instead">Use DeSeq2 to normalise
             data instead</a>
+        -   <a href="#data-transformation" id="toc-data-transformation">Data
+            transformation</a>
     -   <a href="#references" id="toc-references">References</a>
 
 # Introduction
@@ -58,10 +53,10 @@ The following summarises the data obtained:
 </colgroup>
 <thead>
 <tr class="header">
-<th>Subtype</th>
-<th>Total samples</th>
-<th>Studies (Samples)</th>
-<th>Notes</th>
+<th>Subpopulation</th>
+<th>| Total sam</th>
+<th>ples | Studies (Samples)</th>
+<th>| Notes</th>
 </tr>
 </thead>
 <tbody>
@@ -168,6 +163,10 @@ suppressPackageStartupMessages(library(PCAtools))
 library(dplyr)
 suppressPackageStartupMessages(library(SummarizedExperiment))
 library(DESeq2)
+suppressPackageStartupMessages(library(tximeta))
+library(pheatmap)
+library(RColorBrewer)
+library(glmpca)
 ```
 
 ``` r
@@ -220,17 +219,14 @@ barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/refor
                             header = T, row.names = "samples", check.names = F)
 barkley_samples_meta <- data.frame(
   Sample = row.names(barkley_samples),
-  Study = "In-House",
+   Study = "In-House",
   Subtype = "Unknown",
   Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxta-tumor"),
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/",
+  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon",
   row.names = 1
 )
 metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
-rownames(metadata) <- gsub(pattern = "-", replacement = "\\.", x = rownames(metadata))
-# drop directory column
-metadata$directory <- NULL
 metadata[1:5,]
 ```
 
@@ -240,211 +236,12 @@ metadata[1:5,]
     ## B86T7  EGAD00001004810      S3      juxta-tumor
     ## B86T10 EGAD00001004810      S3            tumor
     ## B86T13 EGAD00001004810      S3      juxta-tumor
-
-### Prepare transcript annotations
-
-``` r
-#mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
-#tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
-```
-
-### First attempt at reading in files
-
-``` r
-EGAD00001004810_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001004810_tpm <- assays(EGAD00001004810_rds)$abundance
-EGAD00001003808_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001003808_tpm <- assays(EGAD00001003808_rds)$abundance
-EGAD00001006144_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001006144_tpm <- assays(EGAD00001006144_rds)$abundance
-EGAD00001005744_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon/salmon.merged.gene_counts.rds")
-EGAD00001005744_tpm <- assays(EGAD00001005744_rds)$abundance
-inhouse_rds <- readRDS("/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_caf_nfcore_rnaseq_results/star_salmon/salmon.merged.gene_counts.rds")
-inhouse_tpm <- assays(inhouse_rds)$abundance
-samps <- c("4810", "3808", "6144", "5744", "inhouse")
-dfs <- list(EGAD00001004810_tpm, EGAD00001003808_tpm, EGAD00001006144_tpm, EGAD00001005744_tpm, inhouse_tpm)
-```
-
-The inhouse samples were processed with a different version of
-nf-core/rnaseq, and so have a different number of genes. Here we test
-the pairwise overlap of the gene names for all samples
-
-``` r
-mat <- matrix(data = rep(0, length(dfs)*length(dfs)), 
-              nrow = length(dfs), ncol = length(dfs), dimnames = list(samps,samps))
-mat
-```
-
-    ##         4810 3808 6144 5744 inhouse
-    ## 4810       0    0    0    0       0
-    ## 3808       0    0    0    0       0
-    ## 6144       0    0    0    0       0
-    ## 5744       0    0    0    0       0
-    ## inhouse    0    0    0    0       0
-
-``` r
-for (i in 1:length(dfs)){
-  for (j in 1:length(dfs)){
-    mat[i,j] <- length(intersect(rownames(dfs[[i]]), rownames(dfs[[j]])))
-  }
-}
-mat
-```
-
-    ##          4810  3808  6144  5744 inhouse
-    ## 4810    60603 60603 60603 60603   56388
-    ## 3808    60603 60603 60603 60603   56388
-    ## 6144    60603 60603 60603 60603   56388
-    ## 5744    60603 60603 60603 60603   56388
-    ## inhouse 56388 56388 56388 56388   60728
-
-We want to have the same genes in each matrix
-
-``` r
-data_combined <- Reduce(function(x, y) merge(x, y, all=TRUE, by="rn", suffixes=c("", ".2")), 
-    lapply(dfs, function(x) data.frame(x, rn = row.names(x))))
-# get rid of genes with any NA
-data_combined <- na.omit(data_combined)
-# get rid of genes not expressed in any samples
-thresh <- 0.0001
-data_combined <- data_combined[rowSums(data_combined[,-1]) > thresh, ]
-data_combined <- data_combined %>% remove_rownames %>% column_to_rownames(var="rn")
-# get rid of X in colnames
-colnames(data_combined) <- gsub(pattern = "X", replacement = "", x = colnames(data_combined))
-# only want to keep samples that we want to analyse - those in the metadata object
-data_combined <- data_combined[,intersect(rownames(metadata), colnames(data_combined))]
-```
-
-``` r
-#data_combined
-#summary(data_combined)
-avgs <- apply(data_combined, MARGIN = 1, mean)
-quants <- quantile(avgs, probs = seq(0,1,0.1))
-#length(avgs[avgs > quants[1] & avgs < quants[10]])
-# get genes in middle 80 percentile in terms of mean expression in an attempt to remove outliers
-genes_80 <- avgs[avgs > quants[1] & avgs < quants[10]]
-#genes_80
-genes_80_names <- intersect(names(genes_80), rownames(data_combined))
-data_combined_filter <- data_combined[genes_80_names,]
-#data_combined_filter
-```
-
-For PCA, we want colnames of our `data_combined` object to be the sample
-names and the rownames of our `metadata` to be the sample names
-
-``` r
-all(colnames(data_combined) == rownames(metadata))
-```
-
-    ## [1] TRUE
-
-### PCA
-
-``` r
-p <- pca(data_combined, metadata = metadata, removeVar = 0.1)
-```
-
-    ## -- removing the lower 10% of variables based on variance
-
-``` r
-biplot(p, colby = 'Study', legendPosition = 'top')
-```
-
-    ## Warning: ggrepel: 95 unlabeled data points (too many overlaps). Consider
-    ## increasing max.overlaps
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
-
-``` r
-eigencorplot(p,metavars = c('Study', 'Subtype', 'Tumor_JuxtaTumor'))
-```
-
-    ## Warning in eigencorplot(p, metavars = c("Study", "Subtype",
-    ## "Tumor_JuxtaTumor")): Study is not numeric - please check the source data as
-    ## non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, metavars = c("Study", "Subtype",
-    ## "Tumor_JuxtaTumor")): Subtype is not numeric - please check the source data as
-    ## non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, metavars = c("Study", "Subtype",
-    ## "Tumor_JuxtaTumor")): Tumor_JuxtaTumor is not numeric - please check the source
-    ## data as non-numeric variables will be coerced to numeric
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
-
-It is not surprising that the first principal component is correlated
-with the study of origin. There is also a correlation with subtype, but
-this could also be due to the link with study - different studies tend
-to have different subtypes.
-
-Carry out PCA on the filtered data_combined
-
-``` r
-p_filt <- pca(data_combined_filter, metadata = metadata, removeVar = 0.1)
-```
-
-    ## -- removing the lower 10% of variables based on variance
-
-``` r
-#biplot(p_filt, colby = 'Study', legendPosition = 'top')
-```
-
-``` r
-#hist(data_combined_filter$B86T10)
-```
-
-Look for samples with lots of zero expressed genes
-
-``` r
-prop_not_expressed <- c()
-ngenes <- nrow(data_combined_filter)
-for (i in 1:ncol(data_combined_filter)){
-  prop_not_expressed[i] <- length(which(data_combined_filter[,i] == 0))/ngenes
-  names(prop_not_expressed)[i] <- colnames(data_combined_filter)[i]
-}
-range(prop_not_expressed)
-```
-
-    ## [1] 0.5370828 0.9721156
-
-``` r
-quantile(prop_not_expressed)
-```
-
-    ##        0%       25%       50%       75%      100% 
-    ## 0.5370828 0.5784231 0.6651511 0.7629172 0.9721156
-
-``` r
-# remove samples with >90% genes not expressed
-```
-
-``` r
-metadata_with_prop_not_expressed <- metadata %>% mutate(prop_not_exp = prop_not_expressed[intersect(names(prop_not_expressed), rownames(metadata))]) %>% 
-                                            mutate(ranked_prop_not_exp = rank(prop_not_exp))
-#metadata_with_prop_not_expressed
-```
-
-``` r
-samples_to_remove <- names(which(prop_not_expressed > 0.9))
-data_combined_filter_without_unexpressed_greater_90 <- data_combined_filter %>% dplyr::select(-samples_to_remove)
-```
-
-    ## Note: Using an external vector in selections is ambiguous.
-    ## ℹ Use `all_of(samples_to_remove)` instead of `samples_to_remove` to silence this message.
-    ## ℹ See <https://tidyselect.r-lib.org/reference/faq-external-vector.html>.
-    ## This message is displayed once per session.
-
-``` r
-metadata_remove_outlier <- metadata[!(rownames(metadata) %in% samples_to_remove),] 
-p_filt_remove_outlier <- pca(data_combined_filter_without_unexpressed_greater_90, metadata = metadata_remove_outlier, removeVar = 0.1)
-```
-
-    ## -- removing the lower 10% of variables based on variance
-
-``` r
-#biplot(p_filt_remove_outlier, colby = 'Subtype', legendPosition = 'top')
-```
+    ##                                                                                           directory
+    ## B73T39 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
+    ## B86T3  /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
+    ## B86T7  /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
+    ## B86T10 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
+    ## B86T13 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
 
 ### Use DeSeq2 to normalise data instead
 
@@ -454,15 +251,343 @@ Plan: rerun in house samples with same nfcore version `3.8.1` Read in
 samples with tximport, deseqdataobject etc
 
 ``` r
-#data_combined_matrix <- as.matrix(data_combined)
-#dds <- Deseqdata
-#metadata
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
+                      Subtype = metadata$Subtype, 
+                      Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
+```
+
+    ## Rows: 226882 Columns: 2
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: "\t"
+    ## chr (2): TXNAME, GENEID
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+``` r
+se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+```
+
+    ## reading in files with read_tsv
+    ## 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 
+    ## summarizing abundance
+    ## summarizing counts
+    ## summarizing length
+
+``` r
+dds <- DESeqDataSet(se, design = ~ Study)
+```
+
+    ## using counts and average transcript lengths from tximeta
+
+    ## Warning in DESeqDataSet(se, design = ~Study): some variables in design formula
+    ## are characters, converting to factors
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+``` r
+dim(dds)
+```
+
+    ## [1] 60603   113
+
+``` r
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+dim(dds)
+```
+
+    ## [1] 36458   113
+
+``` r
+# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
+X <- 7
+keep <- rowSums(counts(dds) >= 10) >= X
+dds <- dds[keep,]
+dim(dds)
+```
+
+    ## [1] 22678   113
+
+``` r
+ntd <- normTransform(dds)
+```
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## using 'avgTxLength' from assays(dds), correcting for library size
+
+``` r
+dds <- DESeq(dds)
+```
+
+    ## estimating size factors
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## using 'avgTxLength' from assays(dds), correcting for library size
+
+    ## estimating dispersions
+
+    ## gene-wise dispersion estimates
+
+    ## mean-dispersion relationship
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## final dispersion estimates
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## fitting model and testing
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## -- replacing outliers and refitting for 2685 genes
+    ## -- DESeq argument 'minReplicatesForReplace' = 7 
+    ## -- original counts are preserved in counts(dds)
+
+    ## estimating dispersions
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## fitting model and testing
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+``` r
+select <- order(rowMeans(counts(dds,normalized=TRUE)),
+                decreasing=TRUE)[1:20]
+df <- as.data.frame(colData(dds)[,c("Study","Subtype", "Tumor_JuxtaTumor")])
+pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
+         cluster_cols=FALSE, annotation_col=df, show_colnames = F)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Create%20heatmap%20of%2020%20genes%20with%20highest%20normalised%20mean%20expression-1.png)<!-- -->
+
+From the heatmap, we can see that there are profound batch effects
+present which must be dealt with.
+
+### Data transformation
+
+There are a number of options to choose from when normalising RNA-seq
+data, the main ones being: - Take the log of the data and add a
+pseudocount. - Variance stabilizing transformation (Anders and Huber
+2010) - Regularized logarithm transformation (Love, Huber, and Anders
+2014)
+
+The log+pseudocount approach tends to mean that lowly expressed genes
+have more of an effect. *Vst* and *rlog* bring these counts towards a
+middle amount, making the data more homoskedastic. This allows them to
+be used in downstream processes which require homoskedastic data
+(e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes
+such as ours as it is much faster than *rlog*
+
+``` r
+vsd <- vst(dds, blind = FALSE)
+head(assay(vsd), 3)
+```
+
+    ##                      B73T39    B86T3     B86T7    B86T10    B86T13    B86T16
+    ## ENSG00000000003.14 3.866757 3.866757 13.303147 13.739305  9.197653 10.215319
+    ## ENSG00000000005.6  3.866757 3.866757  3.866757  3.866757  4.729477  7.996898
+    ## ENSG00000000419.12 4.546417 9.724112  5.831559  6.155486 10.001550 10.437130
+    ##                       B86T22 B103T103 B103T107  B103T111  B103T115  B103T51
+    ## ENSG00000000003.14 10.495470 9.805996 9.906286 10.812837 10.321324 9.844911
+    ## ENSG00000000005.6   6.612790 6.522889 6.217076  3.866757  9.369832 3.866757
+    ## ENSG00000000419.12  9.144584 9.243821 9.687213  9.776062 10.241720 9.875850
+    ##                     B103T55   B103T67  B103T71   B103T75  B103T79  B103T83
+    ## ENSG00000000003.14 9.561417 10.380215 8.955318 10.192112 3.866757 9.505005
+    ## ENSG00000000005.6  7.431878  3.866757 3.866757  7.472572 3.866757 7.536091
+    ## ENSG00000000419.12 6.222346  9.010390 9.549980  9.383235 4.667569 8.836295
+    ##                      B103T87  B103T91  B103T95   B103T99    B123U2    B123U6
+    ## ENSG00000000003.14 11.046519 9.854786 9.236606  3.866757 10.103382  9.908686
+    ## ENSG00000000005.6   3.866757 6.705345 3.866757  3.866757  3.866757  4.438059
+    ## ENSG00000000419.12  8.533239 8.354044 9.677032 10.434347  9.176872 10.110374
+    ##                      B123U8   B73T37   B73T40     B86T1    B86T4     B86T5
+    ## ENSG00000000003.14 9.818232 9.427059 4.355369 10.520839 3.866757  9.107014
+    ## ENSG00000000005.6  5.699758 3.866757 3.866757  3.866757 3.866757  7.469991
+    ## ENSG00000000419.12 8.905005 9.793491 8.632692  9.414916 9.720878 10.398777
+    ##                       B86T8     B86T9   B86T11    B86T12   B86T14    B86T15
+    ## ENSG00000000003.14 9.608018  9.537468 3.866757  9.055725 4.297356 10.153948
+    ## ENSG00000000005.6  8.811929  3.866757 3.866757  8.749459 3.866757  3.866757
+    ## ENSG00000000419.12 8.844344 10.213163 8.732383 10.043833 4.716892  9.926172
+    ##                      B86T17    B86T18   B86T21    B86T23    B86T24   B86T26
+    ## ENSG00000000003.14 3.866757  4.532697 3.866757 10.463138 10.723656 3.866757
+    ## ENSG00000000005.6  3.866757 11.090548 3.866757  3.866757  3.866757 3.866757
+    ## ENSG00000000419.12 5.509258  3.866757 4.387635  8.459106  9.392886 3.866757
+    ##                     B103T100 B103T101 B103T104 B103T105 B103T108  B103T109
+    ## ENSG00000000003.14 10.656924 8.203476 3.866757 8.228861 3.866757 10.167013
+    ## ENSG00000000005.6   3.866757 3.866757 3.866757 3.866757 3.866757  4.369259
+    ## ENSG00000000419.12  3.866757 9.295713 9.573438 9.817354 3.866757  8.873852
+    ##                    B103T112   B103T49  B103T52   B103T53   B103T56   B103T57
+    ## ENSG00000000003.14 9.672956 11.186960 8.744178 10.318855 10.295865 10.235381
+    ## ENSG00000000005.6  6.596450  3.866757 3.866757  7.925979 10.078662  3.866757
+    ## ENSG00000000419.12 8.933205  9.003331 4.362166  9.458606  9.465979  9.824871
+    ##                      B103T61  B103T65   B103T69   B103T72  B103T73   B103T76
+    ## ENSG00000000003.14 10.497539 9.754739 10.770916 10.689738 9.025646 12.142127
+    ## ENSG00000000005.6  10.070662 3.866757  3.866757  3.866757 6.736222  3.866757
+    ## ENSG00000000419.12  9.933465 8.961976  9.908984 10.248754 9.535936 11.962847
+    ##                      B103T77  B103T80  B103T81  B103T84  B103T85   B103T93
+    ## ENSG00000000003.14 10.724669 9.516722 6.577462 3.866757 9.842419 10.588569
+    ## ENSG00000000005.6   3.866757 3.866757 6.187225 3.866757 3.866757  3.866757
+    ## ENSG00000000419.12  9.473356 9.954829 9.265016 3.866757 9.366797  9.527731
+    ##                     B103T96   B103T97    B123U1   B123U3   B123U4    B123U7
+    ## ENSG00000000003.14 8.410211 10.253826 10.411564 9.370665 9.464684 11.160920
+    ## ENSG00000000005.6  3.866757  3.866757  3.866757 3.866757 3.866757  3.866757
+    ## ENSG00000000419.12 9.546436  9.154248  9.516907 9.770335 9.245075  9.761120
+    ##                    CAF_Culture_D220T13 CAF_Culture_D220T17 CAF_Culture_D220T21
+    ## ENSG00000000003.14           10.411355            9.717426           10.119597
+    ## ENSG00000000005.6             4.894787            4.596820            3.866757
+    ## ENSG00000000419.12            9.823691            9.812140            9.862794
+    ##                    CAF_Culture_D220T25 CAF_Culture_D220T29 CAF_Culture_D220T33
+    ## ENSG00000000003.14           10.402832            9.927961            9.836486
+    ## ENSG00000000005.6             3.866757            4.193220            3.866757
+    ## ENSG00000000419.12           10.044345           10.261504           10.043271
+    ##                    CAF_Culture_D220T37 A461-A462-A465U15 A461-A462-A465U17
+    ## ENSG00000000003.14            9.591556         10.809829         10.160352
+    ## ENSG00000000005.6             3.866757          5.362144          7.305402
+    ## ENSG00000000419.12           10.071540          9.676252          9.830369
+    ##                    A461-A462-A465U25 A461-A462-A465U27 A461-A462-A465U3
+    ## ENSG00000000003.14          9.960402          8.378325        10.074855
+    ## ENSG00000000005.6           6.434754          7.599629         3.866757
+    ## ENSG00000000419.12         10.183317          9.630945         9.781195
+    ##                    A461-A462-A465U32 A461-A462-A465U35 A461-A462-A465U5
+    ## ENSG00000000003.14         10.691639          8.488310         8.701812
+    ## ENSG00000000005.6           3.866757          3.866757         3.866757
+    ## ENSG00000000419.12          9.909735         10.145741         9.673899
+    ##                    A461-A462-A465U7 A461-A462-A465U9     4033     4034     4027
+    ## ENSG00000000003.14        10.623500         7.763200 9.459894 9.599036 9.090119
+    ## ENSG00000000005.6          4.545603         5.733637 4.280270 3.866757 4.269526
+    ## ENSG00000000419.12        10.113545        10.069071 9.958360 9.813810 9.850216
+    ##                         4028     4112     4113     4116      4117     4214
+    ## ENSG00000000003.14  9.241599 9.269435 9.164897 9.263413  9.181283 9.332912
+    ## ENSG00000000005.6   4.146422 3.866757 3.866757 3.866757  4.269394 4.301056
+    ## ENSG00000000419.12 10.014486 9.828945 9.721642 9.908401 10.032242 9.915502
+    ##                        4215     4315     4316     4340     4341     4344
+    ## ENSG00000000003.14 9.427510 9.184769 9.376886 9.065623 9.043109 9.243710
+    ## ENSG00000000005.6  3.866757 3.866757 3.866757 3.866757 3.866757 3.866757
+    ## ENSG00000000419.12 9.875313 9.790475 9.975637 9.775184 9.892715 9.871946
+    ##                        4345      3532     3533     3536     3537     4299
+    ## ENSG00000000003.14 9.346023  9.058633 9.228147 9.167183 9.249824 9.198150
+    ## ENSG00000000005.6  3.866757  3.866757 3.866757 4.164621 3.866757 3.866757
+    ## ENSG00000000419.12 9.999822 10.009922 9.955196 9.964938 9.883580 9.817371
+    ##                        4300     4722     4723
+    ## ENSG00000000003.14 9.138079 8.557567 9.006320
+    ## ENSG00000000005.6  3.866757 4.955898 3.866757
+    ## ENSG00000000419.12 9.845885 9.704606 9.841769
+
+``` r
+dds <- estimateSizeFactors(dds)
+```
+
+    ##   Note: levels of factors in the design contain characters other than
+    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
+    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
+    ##   for column names in R. [This is a message, not a warning or an error]
+
+    ## using 'avgTxLength' from assays(dds), correcting for library size
+
+``` r
+df <- bind_rows(
+  as_data_frame(log2(counts(dds, normalized=TRUE)[, 1:2]+1)) %>%
+         mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"))
+```
+
+    ## Warning: `as_data_frame()` was deprecated in tibble 2.0.0.
+    ## Please use `as_tibble()` instead.
+    ## The signature and semantics have changed, see `?as_tibble`.
+    ## This warning is displayed once every 8 hours.
+    ## Call `lifecycle::last_lifecycle_warnings()` to see where this warning was generated.
+
+``` r
+colnames(df)[1:2] <- c("x", "y")  
+
+lvls <- c("log2(x + 1)", "vst")
+df$transformation <- factor(df$transformation, levels=lvls)
+
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+There doesn’t seem to much of a difference between the two methods of
+normalisation, only that the lowly expressed genes have been brought up
+to a minimum of \~4.
+
+``` r
+sampleDists <- dist(t(assay(vsd)))
 ```
 
 ``` r
-#basedirs <- c("/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon","/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon", "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon")
-#metadata_without_inhouse <- metadata
-#files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- vsd$Study
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+``` r
+plotPCA(vsd, intgroup = c("Study", "Subtype"))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+
+``` r
+pcaData <- plotPCA(vsd, intgroup = c("Study", "Subtype"), returnData = TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+```
+
+``` r
+ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() +
+  ggtitle("PCA with VST data")
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+``` r
+gpca <- glmpca(counts(dds), L=2)
+gpca.dat <- gpca$factors
+gpca.dat$Study <- dds$Study
+gpca.dat$Subtype <- dds$Subtype
 ```
 
 Next step is to look at batch correction.
