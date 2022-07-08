@@ -1,17 +1,21 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-06 18:13:30
+2022-07-08 20:23:40
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
         -   <a href="#create-sample-file" id="toc-create-sample-file">Create Sample
             File</a>
-        -   <a href="#use-deseq2-to-normalise-data-instead"
-            id="toc-use-deseq2-to-normalise-data-instead">Use DeSeq2 to normalise
-            data instead</a>
+        -   <a href="#read-in-data-with-tximeta-and-create-deseq-object"
+            id="toc-read-in-data-with-tximeta-and-create-deseq-object">Read in data
+            with tximeta and create DESeq object</a>
         -   <a href="#data-transformation" id="toc-data-transformation">Data
             transformation</a>
+    -   <a
+        href="#assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours"
+        id="toc-assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours">Assigning
+        in-house samples to a CAF subtype using K-nearest neighbours</a>
     -   <a href="#references" id="toc-references">References</a>
 
 # Introduction
@@ -115,9 +119,6 @@ We also have scRNA-seq data for S1.
 
 The data was processed using nf-core/rnaseq version `3.8.1` using the
 default parameters. STAR/Salmon were used for alignment/quantification.
-In-house CAF and tumour-associated normal (TAN) RNA-sequencing data were
-processed using nf-core/rnaseq version `3.1`, and STAR/Salmon were also
-used for alignment/quantification.
 
 We would expect our tumour-associated normal to be most like the S3
 subtype (usually accumulate in juxta-tumours).
@@ -149,25 +150,6 @@ certain studies and so is not included at this stage.*
 There are also: ovarian cancer samples, EPCAM+ cells, samples prepared
 by spreading or spreading and samples from lymph nodes. For the time
 being, I will not consider them.
-
-``` r
-suppressPackageStartupMessages(library(dplyr))
-suppressPackageStartupMessages(library(stringr))
-library(biomaRt)
-suppressPackageStartupMessages(library(tximport))
-library(DT)
-suppressPackageStartupMessages(library(tidyverse))
-suppressPackageStartupMessages(library(ggplot2))
-library(cowplot)
-suppressPackageStartupMessages(library(PCAtools))
-library(dplyr)
-suppressPackageStartupMessages(library(SummarizedExperiment))
-library(DESeq2)
-suppressPackageStartupMessages(library(tximeta))
-library(pheatmap)
-library(RColorBrewer)
-library(glmpca)
-```
 
 ``` r
 EGAD_4810 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001004810/delimited_maps/Run_Sample_meta_info.map", 
@@ -219,23 +201,24 @@ barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/refor
                             header = T, row.names = "samples", check.names = F)
 barkley_samples_meta <- data.frame(
   Sample = row.names(barkley_samples),
-   Study = "In-House",
+   Study = "InHouse",
   Subtype = "Unknown",
-  Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxta-tumor"),
+  Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxtatumor"),
   directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon",
   row.names = 1
 )
 metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
+metadata$Tumor_JuxtaTumor <- gsub(x = metadata$Tumor_JuxtaTumor, pattern = "-", replacement = "")
 metadata[1:5,]
 ```
 
     ##                  Study Subtype Tumor_JuxtaTumor
     ## B73T39 EGAD00001004810      S3            tumor
     ## B86T3  EGAD00001004810      S3            tumor
-    ## B86T7  EGAD00001004810      S3      juxta-tumor
+    ## B86T7  EGAD00001004810      S3       juxtatumor
     ## B86T10 EGAD00001004810      S3            tumor
-    ## B86T13 EGAD00001004810      S3      juxta-tumor
+    ## B86T13 EGAD00001004810      S3       juxtatumor
     ##                                                                                           directory
     ## B73T39 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
     ## B86T3  /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
@@ -243,11 +226,9 @@ metadata[1:5,]
     ## B86T10 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
     ## B86T13 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
 
-### Use DeSeq2 to normalise data instead
+### Read in data with tximeta and create DESeq object
 
-Difficult to mess around with filters etc.
-
-Plan: rerun in house samples with same nfcore version `3.8.1` Read in
+Samples were processed with nf-core/rnaseq version `3.8.1` Read in
 samples with tximport, deseqdataobject etc
 
 ``` r
@@ -286,11 +267,6 @@ dds <- DESeqDataSet(se, design = ~ Study)
     ## Warning in DESeqDataSet(se, design = ~Study): some variables in design formula
     ## are characters, converting to factors
 
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
-
 ``` r
 dim(dds)
 ```
@@ -298,31 +274,16 @@ dim(dds)
     ## [1] 60603   113
 
 ``` r
+# returns a vector of whether the total count of each gene is >= 10 (True or fals)
 keep <- rowSums(counts(dds)) >= 10
+# only keep rows (genes) for which keep is TRUE
 dds <- dds[keep,]
-dim(dds)
-```
-
-    ## [1] 36458   113
-
-``` r
 # at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
 X <- 7
 keep <- rowSums(counts(dds) >= 10) >= X
 dds <- dds[keep,]
-dim(dds)
-```
-
-    ## [1] 22678   113
-
-``` r
 ntd <- normTransform(dds)
 ```
-
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
 
@@ -332,11 +293,6 @@ dds <- DESeq(dds)
 
     ## estimating size factors
 
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
-
     ## using 'avgTxLength' from assays(dds), correcting for library size
 
     ## estimating dispersions
@@ -345,24 +301,9 @@ dds <- DESeq(dds)
 
     ## mean-dispersion relationship
 
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
-
     ## final dispersion estimates
 
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
-
     ## fitting model and testing
-
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
 
     ## -- replacing outliers and refitting for 2685 genes
     ## -- DESeq argument 'minReplicatesForReplace' = 7 
@@ -370,17 +311,7 @@ dds <- DESeq(dds)
 
     ## estimating dispersions
 
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
-
     ## fitting model and testing
-
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
 
 ``` r
 select <- order(rowMeans(counts(dds,normalized=TRUE)),
@@ -412,106 +343,11 @@ such as ours as it is much faster than *rlog*
 
 ``` r
 vsd <- vst(dds, blind = FALSE)
-head(assay(vsd), 3)
 ```
-
-    ##                      B73T39    B86T3     B86T7    B86T10    B86T13    B86T16
-    ## ENSG00000000003.14 3.866757 3.866757 13.303147 13.739305  9.197653 10.215319
-    ## ENSG00000000005.6  3.866757 3.866757  3.866757  3.866757  4.729477  7.996898
-    ## ENSG00000000419.12 4.546417 9.724112  5.831559  6.155486 10.001550 10.437130
-    ##                       B86T22 B103T103 B103T107  B103T111  B103T115  B103T51
-    ## ENSG00000000003.14 10.495470 9.805996 9.906286 10.812837 10.321324 9.844911
-    ## ENSG00000000005.6   6.612790 6.522889 6.217076  3.866757  9.369832 3.866757
-    ## ENSG00000000419.12  9.144584 9.243821 9.687213  9.776062 10.241720 9.875850
-    ##                     B103T55   B103T67  B103T71   B103T75  B103T79  B103T83
-    ## ENSG00000000003.14 9.561417 10.380215 8.955318 10.192112 3.866757 9.505005
-    ## ENSG00000000005.6  7.431878  3.866757 3.866757  7.472572 3.866757 7.536091
-    ## ENSG00000000419.12 6.222346  9.010390 9.549980  9.383235 4.667569 8.836295
-    ##                      B103T87  B103T91  B103T95   B103T99    B123U2    B123U6
-    ## ENSG00000000003.14 11.046519 9.854786 9.236606  3.866757 10.103382  9.908686
-    ## ENSG00000000005.6   3.866757 6.705345 3.866757  3.866757  3.866757  4.438059
-    ## ENSG00000000419.12  8.533239 8.354044 9.677032 10.434347  9.176872 10.110374
-    ##                      B123U8   B73T37   B73T40     B86T1    B86T4     B86T5
-    ## ENSG00000000003.14 9.818232 9.427059 4.355369 10.520839 3.866757  9.107014
-    ## ENSG00000000005.6  5.699758 3.866757 3.866757  3.866757 3.866757  7.469991
-    ## ENSG00000000419.12 8.905005 9.793491 8.632692  9.414916 9.720878 10.398777
-    ##                       B86T8     B86T9   B86T11    B86T12   B86T14    B86T15
-    ## ENSG00000000003.14 9.608018  9.537468 3.866757  9.055725 4.297356 10.153948
-    ## ENSG00000000005.6  8.811929  3.866757 3.866757  8.749459 3.866757  3.866757
-    ## ENSG00000000419.12 8.844344 10.213163 8.732383 10.043833 4.716892  9.926172
-    ##                      B86T17    B86T18   B86T21    B86T23    B86T24   B86T26
-    ## ENSG00000000003.14 3.866757  4.532697 3.866757 10.463138 10.723656 3.866757
-    ## ENSG00000000005.6  3.866757 11.090548 3.866757  3.866757  3.866757 3.866757
-    ## ENSG00000000419.12 5.509258  3.866757 4.387635  8.459106  9.392886 3.866757
-    ##                     B103T100 B103T101 B103T104 B103T105 B103T108  B103T109
-    ## ENSG00000000003.14 10.656924 8.203476 3.866757 8.228861 3.866757 10.167013
-    ## ENSG00000000005.6   3.866757 3.866757 3.866757 3.866757 3.866757  4.369259
-    ## ENSG00000000419.12  3.866757 9.295713 9.573438 9.817354 3.866757  8.873852
-    ##                    B103T112   B103T49  B103T52   B103T53   B103T56   B103T57
-    ## ENSG00000000003.14 9.672956 11.186960 8.744178 10.318855 10.295865 10.235381
-    ## ENSG00000000005.6  6.596450  3.866757 3.866757  7.925979 10.078662  3.866757
-    ## ENSG00000000419.12 8.933205  9.003331 4.362166  9.458606  9.465979  9.824871
-    ##                      B103T61  B103T65   B103T69   B103T72  B103T73   B103T76
-    ## ENSG00000000003.14 10.497539 9.754739 10.770916 10.689738 9.025646 12.142127
-    ## ENSG00000000005.6  10.070662 3.866757  3.866757  3.866757 6.736222  3.866757
-    ## ENSG00000000419.12  9.933465 8.961976  9.908984 10.248754 9.535936 11.962847
-    ##                      B103T77  B103T80  B103T81  B103T84  B103T85   B103T93
-    ## ENSG00000000003.14 10.724669 9.516722 6.577462 3.866757 9.842419 10.588569
-    ## ENSG00000000005.6   3.866757 3.866757 6.187225 3.866757 3.866757  3.866757
-    ## ENSG00000000419.12  9.473356 9.954829 9.265016 3.866757 9.366797  9.527731
-    ##                     B103T96   B103T97    B123U1   B123U3   B123U4    B123U7
-    ## ENSG00000000003.14 8.410211 10.253826 10.411564 9.370665 9.464684 11.160920
-    ## ENSG00000000005.6  3.866757  3.866757  3.866757 3.866757 3.866757  3.866757
-    ## ENSG00000000419.12 9.546436  9.154248  9.516907 9.770335 9.245075  9.761120
-    ##                    CAF_Culture_D220T13 CAF_Culture_D220T17 CAF_Culture_D220T21
-    ## ENSG00000000003.14           10.411355            9.717426           10.119597
-    ## ENSG00000000005.6             4.894787            4.596820            3.866757
-    ## ENSG00000000419.12            9.823691            9.812140            9.862794
-    ##                    CAF_Culture_D220T25 CAF_Culture_D220T29 CAF_Culture_D220T33
-    ## ENSG00000000003.14           10.402832            9.927961            9.836486
-    ## ENSG00000000005.6             3.866757            4.193220            3.866757
-    ## ENSG00000000419.12           10.044345           10.261504           10.043271
-    ##                    CAF_Culture_D220T37 A461-A462-A465U15 A461-A462-A465U17
-    ## ENSG00000000003.14            9.591556         10.809829         10.160352
-    ## ENSG00000000005.6             3.866757          5.362144          7.305402
-    ## ENSG00000000419.12           10.071540          9.676252          9.830369
-    ##                    A461-A462-A465U25 A461-A462-A465U27 A461-A462-A465U3
-    ## ENSG00000000003.14          9.960402          8.378325        10.074855
-    ## ENSG00000000005.6           6.434754          7.599629         3.866757
-    ## ENSG00000000419.12         10.183317          9.630945         9.781195
-    ##                    A461-A462-A465U32 A461-A462-A465U35 A461-A462-A465U5
-    ## ENSG00000000003.14         10.691639          8.488310         8.701812
-    ## ENSG00000000005.6           3.866757          3.866757         3.866757
-    ## ENSG00000000419.12          9.909735         10.145741         9.673899
-    ##                    A461-A462-A465U7 A461-A462-A465U9     4033     4034     4027
-    ## ENSG00000000003.14        10.623500         7.763200 9.459894 9.599036 9.090119
-    ## ENSG00000000005.6          4.545603         5.733637 4.280270 3.866757 4.269526
-    ## ENSG00000000419.12        10.113545        10.069071 9.958360 9.813810 9.850216
-    ##                         4028     4112     4113     4116      4117     4214
-    ## ENSG00000000003.14  9.241599 9.269435 9.164897 9.263413  9.181283 9.332912
-    ## ENSG00000000005.6   4.146422 3.866757 3.866757 3.866757  4.269394 4.301056
-    ## ENSG00000000419.12 10.014486 9.828945 9.721642 9.908401 10.032242 9.915502
-    ##                        4215     4315     4316     4340     4341     4344
-    ## ENSG00000000003.14 9.427510 9.184769 9.376886 9.065623 9.043109 9.243710
-    ## ENSG00000000005.6  3.866757 3.866757 3.866757 3.866757 3.866757 3.866757
-    ## ENSG00000000419.12 9.875313 9.790475 9.975637 9.775184 9.892715 9.871946
-    ##                        4345      3532     3533     3536     3537     4299
-    ## ENSG00000000003.14 9.346023  9.058633 9.228147 9.167183 9.249824 9.198150
-    ## ENSG00000000005.6  3.866757  3.866757 3.866757 4.164621 3.866757 3.866757
-    ## ENSG00000000419.12 9.999822 10.009922 9.955196 9.964938 9.883580 9.817371
-    ##                        4300     4722     4723
-    ## ENSG00000000003.14 9.138079 8.557567 9.006320
-    ## ENSG00000000005.6  3.866757 4.955898 3.866757
-    ## ENSG00000000419.12 9.845885 9.704606 9.841769
 
 ``` r
 dds <- estimateSizeFactors(dds)
 ```
-
-    ##   Note: levels of factors in the design contain characters other than
-    ##   letters, numbers, '_' and '.'. It is recommended (but not required) to use
-    ##   only letters, numbers, and delimiters '_' or '.', as these are safe characters
-    ##   for column names in R. [This is a message, not a warning or an error]
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
 
@@ -538,34 +374,56 @@ ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
   coord_fixed() + facet_grid( . ~ transformation)  
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 There doesn’t seem to much of a difference between the two methods of
 normalisation, only that the lowly expressed genes have been brought up
 to a minimum of \~4.
 
 ``` r
+# find euclidean distance between samples for heatmap generation (normalised data)
 sampleDists <- dist(t(assay(vsd)))
+# don't want files column to be on heatmap
+subset_coldata <- subset(coldata, select = -c(files))
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(subset_coldata) <- subset_coldata$names
+subset_coldata$names <- NULL
+#rownames(sampleDistMatrix) <- vsd$Study
+#colnames(sampleDistMatrix) <- NULL
+#colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+#pheatmap(sampleDistMatrix,
+ #        clustering_distance_rows = sampleDists,
+  #       clustering_distance_cols = sampleDists,
+   #      col = colors)
 ```
 
 ``` r
-sampleDistMatrix <- as.matrix( sampleDists )
-rownames(sampleDistMatrix) <- vsd$Study
-colnames(sampleDistMatrix) <- NULL
-colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
-pheatmap(sampleDistMatrix,
-         clustering_distance_rows = sampleDists,
-         clustering_distance_cols = sampleDists,
-         col = colors)
+ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
+                  Subtype = c(S1 = "dodgerblue4", S3 = "chartreuse1", S4 = "grey67", Unknown = "palevioletred"),
+                  Tumor_JuxtaTumor = c(tumor = "royalblue", juxtatumor = "red")
+                  )
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+``` r
+pheatmap(mat=sampleDistMatrix,
+         show_rownames = FALSE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         show_colnames = FALSE,
+         annotation_col = subset_coldata,
+         annotation_colors = ann_colors,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
 
 ``` r
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ``` r
 pcaData <- plotPCA(vsd, intgroup = c("Study", "Subtype"), returnData = TRUE)
@@ -581,7 +439,7 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
   ggtitle("PCA with VST data")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
 gpca <- glmpca(counts(dds), L=2)
@@ -591,6 +449,156 @@ gpca.dat$Subtype <- dds$Subtype
 ```
 
 Next step is to look at batch correction.
+
+``` r
+library(limma)
+```
+
+    ## 
+    ## Attaching package: 'limma'
+
+    ## The following object is masked from 'package:DESeq2':
+    ## 
+    ##     plotMA
+
+    ## The following object is masked from 'package:BiocGenerics':
+    ## 
+    ##     plotMA
+
+``` r
+mat <- assay(vsd)
+mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd))
+mat <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
+```
+
+    ## Coefficients not estimable: batch2 batch4
+
+    ## Warning: Partial NA coefficients for 22678 probe(s)
+
+``` r
+assay(vsd) <- mat
+plotPCA(vsd, intgroup = c("Subtype", "Study"))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20tumor%20juxta%20+%20subtype%20model%20matrix-1.png)<!-- -->
+Limma’s removeBatchEffect function requires a design matrix as input,
+this is the “treatment conditions” we wish to preserve. It is usually
+the design matrix with all experimental factors other than batch
+effects. I do not know whether to include Subtype in this matrix, as
+this treats `Unknown` as its own subtype, and so will preserve
+differences between the InHouse samples and the other samples, as seen
+in the above PCA plot.
+
+``` r
+mat <- assay(vsd)
+mm <- model.matrix(~Tumor_JuxtaTumor, colData(vsd))
+mat <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
+assay(vsd) <- mat
+plotPCA(vsd, intgroup = c("Subtype", "Study"))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20tumor%20juxta%20only%20matrix-1.png)<!-- -->
+
+In the PCA plot above, we have not told the `removeBatchEffect` function
+about our known subtypes, only whether the samples were taken from Tumor
+or Juxta-Tumor. It does not know to preserve differences between
+subpopulations when removing batch effects. We have much less variance
+being explained by PC1 than in the first scenario (39% vs 68%). In the
+first PCA plot, our in-house samples of unknown subtype cluster together
+on their own.
+
+``` r
+#mat <- assay(vsd)
+#modmatrix <- model.matrix(~as.factor(Tumor_JuxtaTumor), colData(vsd))
+#batchQC(mat, batch=coldata$Study, condition= coldata$Subtype, 
+      #  report_file = "batchqc_caf_data_not_corrected.html",
+       # report_dir = ".", view_report = FALSE, interactive = FALSE
+      #  )
+```
+
+## Assigning in-house samples to a CAF subtype using K-nearest neighbours
+
+1.  Split mat into our known (training) and unknown (testing)
+    subpopulations
+2.  Run KNN
+
+``` r
+mat_t <- t(mat)
+mat_known <- mat_t[coldata$names[which(coldata$Subtype != "Unknown")],]
+coldata_known <- coldata[coldata$Subtype != "Unknown",]
+mat_unknown <- mat_t[coldata$names[which(coldata$Subtype == "Unknown")],]
+coldata_unknown <- coldata[coldata$Subtype == "Unknown",]
+```
+
+``` r
+library(class)
+```
+
+``` r
+##create a random number equal 90% of total number of rows
+ ran <- sample(1:nrow(mat_known),0.9 * nrow(mat_known))
+ ##training dataset extracted
+ mat_train <- mat_known[ran,]
+ 
+ ##test dataset extracted
+ mat_test <- mat_known[-ran,]
+```
+
+``` r
+# these are our labels
+caf_target_category <- coldata_known[ran,4]
+caf_test_category <- coldata_known[-ran,4]
+```
+
+``` r
+pr <- knn(mat_train,mat_test,cl=caf_target_category,k=21)
+```
+
+``` r
+ tab <- table(pr,caf_test_category)
+tab
+```
+
+    ##     caf_test_category
+    ## pr   S1 S3 S4
+    ##   S1  3  4  2
+    ##   S3  0  0  0
+    ##   S4  0  0  0
+
+``` r
+accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
+ accuracy(tab)
+```
+
+    ## [1] 33.33333
+
+``` r
+  outputs <- c()
+for (i in 1:50){
+  pr <- knn(mat_train,mat_test,cl=caf_target_category,k=i)
+  number <- i
+  tab <- table(pr,caf_test_category)
+  accuracy_out <- accuracy(tab)
+  outputs <- c(outputs, number = accuracy_out)
+}
+```
+
+``` r
+plot(outputs)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+
+``` r
+  prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
+prediction
+```
+
+    ##  [1] S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1
+    ## Levels: S1 S3 S4
+
+They are all predicted to be S1 using this initial application of the
+algorithm. Possibly use interquartile range to improve performance?
 
 ## References
 
