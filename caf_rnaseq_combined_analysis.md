@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-08 20:23:40
+2022-07-11 19:18:25
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -12,6 +12,8 @@ Kevin Ryan
             with tximeta and create DESeq object</a>
         -   <a href="#data-transformation" id="toc-data-transformation">Data
             transformation</a>
+        -   <a href="#batch-correction" id="toc-batch-correction">Batch
+            correction</a>
     -   <a
         href="#assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours"
         id="toc-assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours">Assigning
@@ -314,17 +316,14 @@ dds <- DESeq(dds)
     ## fitting model and testing
 
 ``` r
-select <- order(rowMeans(counts(dds,normalized=TRUE)),
-                decreasing=TRUE)[1:20]
-df <- as.data.frame(colData(dds)[,c("Study","Subtype", "Tumor_JuxtaTumor")])
-pheatmap(assay(ntd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
-         cluster_cols=FALSE, annotation_col=df, show_colnames = F)
+ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
+                  Subtype = c(S1 = "dodgerblue4", S3 = "chartreuse1", S4 = "grey67", Unknown = "palevioletred"),
+                  Tumor_JuxtaTumor = c(tumor = "royalblue", juxtatumor = "red")
+                  )
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/Create%20heatmap%20of%2020%20genes%20with%20highest%20normalised%20mean%20expression-1.png)<!-- -->
-
-From the heatmap, we can see that there are profound batch effects
-present which must be dealt with.
+From the heatmap, we can see that there are batch effects present which
+must be dealt with.
 
 ### Data transformation
 
@@ -342,6 +341,8 @@ be used in downstream processes which require homoskedastic data
 such as ours as it is much faster than *rlog*
 
 ``` r
+# here, blind is FALSE as we don't want it to be blind to experimental design 
+# recommended when transforming data for downstream analysis which will use the design information
 vsd <- vst(dds, blind = FALSE)
 ```
 
@@ -374,28 +375,15 @@ ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
   coord_fixed() + facet_grid( . ~ transformation)  
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
 There doesn’t seem to much of a difference between the two methods of
 normalisation, only that the lowly expressed genes have been brought up
 to a minimum of \~4.
 
-``` r
-# find euclidean distance between samples for heatmap generation (normalised data)
-sampleDists <- dist(t(assay(vsd)))
-# don't want files column to be on heatmap
-subset_coldata <- subset(coldata, select = -c(files))
-sampleDistMatrix <- as.matrix( sampleDists )
-rownames(subset_coldata) <- subset_coldata$names
-subset_coldata$names <- NULL
-#rownames(sampleDistMatrix) <- vsd$Study
-#colnames(sampleDistMatrix) <- NULL
-#colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
-#pheatmap(sampleDistMatrix,
- #        clustering_distance_rows = sampleDists,
-  #       clustering_distance_cols = sampleDists,
-   #      col = colors)
-```
+### Batch correction
+
+The following graphs demonstrate the batch effects
 
 ``` r
 ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
@@ -405,6 +393,14 @@ ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "g
 ```
 
 ``` r
+# find euclidean distance between samples for heatmap generation (normalised data)
+sampleDists <- dist(t(assay(vsd)))
+# don't want files column to be on heatmap
+subset_coldata <- subset(coldata, select = -c(files))
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(subset_coldata) <- subset_coldata$names
+subset_coldata$names <- NULL
+
 pheatmap(mat=sampleDistMatrix,
          show_rownames = FALSE,
          cluster_cols = TRUE,
@@ -417,7 +413,7 @@ pheatmap(mat=sampleDistMatrix,
          col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Generate%20distance%20matrix%20+%20generate%20heatmap-1.png)<!-- -->
 
 ``` r
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
@@ -441,14 +437,9 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
-``` r
-gpca <- glmpca(counts(dds), L=2)
-gpca.dat <- gpca$factors
-gpca.dat$Study <- dds$Study
-gpca.dat$Subtype <- dds$Subtype
-```
-
 Next step is to look at batch correction.
+
+#### Method 1: Limma’s remove batch effect function
 
 ``` r
 library(limma)
@@ -466,9 +457,57 @@ library(limma)
     ##     plotMA
 
 ``` r
-mat <- assay(vsd)
-mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd))
-mat <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
+vsd_remove_batch_intercept <- vsd
+vsd_remove_batch_tumor_juxta_subtype <- vsd
+vsd_remove_batch_tumor_juxta_only <- vsd
+```
+
+``` r
+mat <- assay(vsd_remove_batch_intercept)
+mm <- model.matrix(~1, colData(vsd_remove_batch_intercept))
+mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_intercept$Study, design = mm)
+assay(vsd_remove_batch_intercept) <- mat
+pca_batch_correct_intercept <- plotPCA(vsd, intgroup = c("Subtype","Study")) + 
+  aes(x = PC1, y = PC2, color = colData(vsd_remove_batch_intercept)$Subtype, shape =colData(vsd_remove_batch_intercept)$Study ) +
+  labs(color='Subpopulation', shape = "Study") +
+  ggtitle("PCA of VST data batch corrected using \nlimma::removeBatchEffect with intercept term only")
+pca_batch_correct_intercept
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20model%20matrix%20with%20only%20an%20intercept%20term-1.png)<!-- -->
+
+``` r
+# find euclidean distance between samples for heatmap generation (normalised data)
+# same template as previous heatmap
+sampleDists <- dist(t(assay(vsd_remove_batch_intercept)))
+sampleDistMatrix <- as.matrix( sampleDists )
+
+pheatmap(mat=sampleDistMatrix,
+         show_rownames = FALSE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         show_colnames = FALSE,
+         annotation_col = subset_coldata,
+         annotation_colors = ann_colors,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20model%20matrix%20with%20only%20an%20intercept%20term,%20heatmap-1.png)<!-- -->
+
+Limma’s removeBatchEffect function requires a design matrix as input,
+this is the “treatment conditions” we wish to preserve. It is usually
+the design matrix with all experimental factors other than batch
+effects. I do not know whether to include Subtype in this matrix, as
+this treats `Unknown` as its own subtype, and so will preserve
+differences between the InHouse samples and the other samples, as seen
+in the below PCA plot.
+
+``` r
+mat <- assay(vsd_remove_batch_tumor_juxta_subtype)
+mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd_remove_batch_tumor_juxta_subtype))
+mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_tumor_juxta_subtype$Study, design = mm)
 ```
 
     ## Coefficients not estimable: batch2 batch4
@@ -476,36 +515,60 @@ mat <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
     ## Warning: Partial NA coefficients for 22678 probe(s)
 
 ``` r
-assay(vsd) <- mat
-plotPCA(vsd, intgroup = c("Subtype", "Study"))
+assay(vsd_remove_batch_tumor_juxta_subtype) <- mat
+
+pca_batch_correct_tumor_juxta_subtype <- plotPCA(vsd_remove_batch_tumor_juxta_subtype, intgroup = c("Subtype","Study")) + 
+  aes(x = PC1, y = PC2, color = colData(vsd_remove_batch_tumor_juxta_subtype)$Subtype, shape =colData(vsd_remove_batch_tumor_juxta_subtype)$Study ) +
+  labs(color='Subpopulation', shape = "Study") +
+  ggtitle("PCA of VST data batch corrected using \nlimma::removeBatchEffect with Tumor_JuxtaTumor\nand Subtype in model")
+pca_batch_correct_tumor_juxta_subtype
 ```
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20tumor%20juxta%20+%20subtype%20model%20matrix-1.png)<!-- -->
-Limma’s removeBatchEffect function requires a design matrix as input,
-this is the “treatment conditions” we wish to preserve. It is usually
-the design matrix with all experimental factors other than batch
-effects. I do not know whether to include Subtype in this matrix, as
-this treats `Unknown` as its own subtype, and so will preserve
-differences between the InHouse samples and the other samples, as seen
-in the above PCA plot.
+
+``` r
+# find euclidean distance between samples for heatmap generation (normalised data)
+# same template as previous heatmap
+
+sampleDists <- dist(t(assay(vsd_remove_batch_tumor_juxta_subtype)))
+sampleDistMatrix <- as.matrix( sampleDists )
+
+pheatmap(mat=sampleDistMatrix,
+         show_rownames = FALSE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         show_colnames = FALSE,
+         annotation_col = subset_coldata,
+         annotation_colors = ann_colors,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20model%20matrix%20with%20Study+Subpopulation,%20heatmap-1.png)<!-- -->
+
+We can see from the PCA and heatmap above that including condition
+(tumour-juxtatumour) and subtype in our model matrix leads to good
+separation of the subtypes, and a lack of clustering by batch. The
+problem with this approach is that it treats our `Unknown` subtype as
+its own subtype, which means it will cluster on its own no matter what
+we do. Is there a way around this? Frozen surrogate variable analysis
+could be an option, but this is usually used on microarray data, I don’t
+know if it can be used on RNA-sequencing data.
 
 ``` r
 mat <- assay(vsd)
 mm <- model.matrix(~Tumor_JuxtaTumor, colData(vsd))
-mat <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
-assay(vsd) <- mat
-plotPCA(vsd, intgroup = c("Subtype", "Study"))
+mat_batch_removed_limma <- limma::removeBatchEffect(mat, batch = vsd$Study, design = mm)
 ```
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/removeBatchEffect%20tumor%20juxta%20only%20matrix-1.png)<!-- -->
 
 In the PCA plot above, we have not told the `removeBatchEffect` function
 about our known subtypes, only whether the samples were taken from Tumor
 or Juxta-Tumor. It does not know to preserve differences between
-subpopulations when removing batch effects. We have much less variance
-being explained by PC1 than in the first scenario (39% vs 68%). In the
-first PCA plot, our in-house samples of unknown subtype cluster together
-on their own.
+subpopulations when removing batch effects. Less variance being
+explained by PC1 than in the first scenario (39% vs 68%). In the first
+PCA plot, our in-house samples of unknown subtype cluster together on
+their own.
 
 ``` r
 #mat <- assay(vsd)
@@ -514,6 +577,31 @@ on their own.
       #  report_file = "batchqc_caf_data_not_corrected.html",
        # report_dir = ".", view_report = FALSE, interactive = FALSE
       #  )
+```
+
+``` r
+coldata_pca <- coldata
+rownames(coldata_pca) <- coldata_pca$names
+coldata_pca$names <- NULL
+coldata_pca$files <- NULL
+p <- pca(mat, metadata = coldata_pca)
+```
+
+``` r
+ggplot(p$rotated, aes(x = PC1, y = PC2, color = p$metadata$Study, shape = p$metadata$Subtype)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() +
+  labs(color='Study', shape = "Subpopulation") +
+  ggtitle("PCA with transormed data after batch correction")
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+``` r
+batch <- coldata$Study
+mm <- model.matrix(~Tumor_JuxtaTumor, colData(vsd))
 ```
 
 ## Assigning in-house samples to a CAF subtype using K-nearest neighbours
@@ -561,9 +649,9 @@ tab
 
     ##     caf_test_category
     ## pr   S1 S3 S4
-    ##   S1  3  4  2
+    ##   S1  2  3  3
     ##   S3  0  0  0
-    ##   S4  0  0  0
+    ##   S4  0  0  1
 
 ``` r
 accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
@@ -587,7 +675,7 @@ for (i in 1:50){
 plot(outputs)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
 
 ``` r
   prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
