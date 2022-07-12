@@ -29,7 +29,7 @@ FACS gating strategies can be used to isolate these various subtypes. The Mechta
 The following summarises the data obtained:
 
 +---------------+---------------+-----------------------+-------------------------------+
-| Subpopulation       | Total samples | Studies (Samples)     |  Notes                        |
+| Subpopulation | Total samples | Studies (Samples)     |  Notes                        |
 +===============+===============+=======================+===============================+
 | S1            |  28           | - EGAD00001003808 (16)| -  3808 has 12xJuxta-tumor    |
 |               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
@@ -158,6 +158,7 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
                       Subtype = metadata$Subtype, 
                       Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
                       stringsAsFactors=FALSE)
+# tx2gene file for the gencode v31 file used in the analysis
 tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
 se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
 ```
@@ -166,7 +167,7 @@ se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
 ```{r Apply common filters according to DESeq2 vignette to remove lowly expressed genes}
 dds <- DESeqDataSet(se, design = ~ Study)
 dim(dds)
-# returns a vector of whether the total count of each gene is >= 10 (True or fals)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
 keep <- rowSums(counts(dds)) >= 10
 # only keep rows (genes) for which keep is TRUE
 dds <- dds[keep,]
@@ -181,17 +182,6 @@ ntd <- normTransform(dds)
 dds <- DESeq(dds)
 ```
 
-```{r}
-ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
-                  Subtype = c(S1 = "dodgerblue4", S3 = "chartreuse1", S4 = "grey67", Unknown = "palevioletred"),
-                  Tumor_JuxtaTumor = c(tumor = "royalblue", juxtatumor = "red")
-                  )
-```
-
-
-
-From the heatmap, we can see that there are batch effects present which must be dealt with.
-
 ### Data transformation
 
 There are a number of options to choose from when normalising RNA-seq data, the main ones being:
@@ -199,7 +189,7 @@ There are a number of options to choose from when normalising RNA-seq data, the 
  -  Variance stabilizing transformation (Anders and Huber 2010)
  -  Regularized logarithm transformation (Love, Huber, and Anders 2014)
 
-The log+pseudocount approach tends to mean that lowly expressed genes have more of an effect. *Vst* and *rlog* bring these counts towards a middle amount, making the data more homoskedastic. This allows them to be used in downstream processes which require homoskedastic data (e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes such as ours as it is much faster than *rlog*
+The log+pseudocount approach tends to mean that lowly expressed genes have more of an effect. *Vst* and *rlog* bring these counts towards a central amount, making the data more homoskedastic. This allows them to be used in downstream processes which require homoskedastic data (e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes such as ours as it is much faster than *rlog*
 
 
 ```{r}
@@ -226,6 +216,55 @@ ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
 ```
 
 There doesn't seem to much of a difference between the two methods of normalisation, only that the lowly expressed genes have been brought up to a minimum of ~4. 
+
+### QC - PCA per study for outlier detection
+
+```{r}
+#studies <- levels(colData(vsd)$Study)
+# write a function which takes in DESeq object & creates PCA of all studies
+deseq_pca_studies <- function(dds_object){
+  library(PCAtools)
+  library(ggplot2)
+  studies <- levels(colData(dds_object)$Study)
+  pca_plots <- list()
+  for (i in 1:length(studies)){
+    study <- studies[i]
+    samples <- colnames(dds_object)[which(colData(dds_object)$Study == study)]
+    dds_object_study <- dds_object[,samples]
+    stopifnot(dim(dds_object_study)[2] == length(samples))
+    pca_plot_data <- plotPCA(dds_object_study, intgroup = c("Subtype", "Tumor_JuxtaTumor"), returnData = TRUE)
+    percentVar <- round(100 * attr(pca_plot_data, "percentVar"))
+    title <- paste("PCA plot of study:", study, sep = " ")
+    #plot_labels <- rownames(pca_plot_data)
+    #print(samples)
+    #print(length(samples))
+    pca_plot_data$samples <- rownames(pca_plot_data)
+    pca_plot <- ggplot(pca_plot_data, aes(x = PC1, y = PC2, color = Subtype, shape = Tumor_JuxtaTumor, label = samples)) +
+                geom_point(size =3) +
+                geom_text(hjust="middle", vjust=1, data = subset(pca_plot_data, PC2 > 22)) +
+                xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+                ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+                coord_fixed() +
+                ggtitle(title)
+    pca_plots[[i]] <- pca_plot
+    #print(pca_plots[i])
+  }
+  #stopifnot(length(pca_plots) == length(studies))
+  return(pca_plots)
+}
+```
+
+```{r}
+output <- deseq_pca_studies(vsd)
+output
+#output
+```
+
+```{r}
+plotPCA(vsd, intgroup = c("Study", "Subtype"))
+
+```
+
 
 ### Batch correction
 
@@ -280,12 +319,11 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
   ggtitle("PCA with VST data")
 ```
 
-
 Next step is to look at batch correction.
 
 #### Method 1: Limma's remove batch effect function
 
-```{r}
+```{r message=FALSE}
 library(limma)
 ```
 
@@ -327,10 +365,11 @@ pheatmap(mat=sampleDistMatrix,
 
 ```
 
-Limma's removeBatchEffect function requires a design matrix as input, this is the "treatment conditions" we wish to preserve. It is usually the design matrix with all experimental factors other than batch effects. I do not know whether to include Subtype in this matrix, as this treats `Unknown` as its own subtype, and so will preserve differences between the InHouse samples and the other samples, as seen in the below PCA plot.
+Limma's removeBatchEffect function requires a design matrix as input, this is the "treatment conditions" we wish to preserve. It is usually the design matrix with all experimental factors other than batch effects. The ideal scenario would be to include Subtype in this matrix. However, this treats `Unknown` as its own subtype, and so will preserve differences between the InHouse samples and the other samples, as seen in the below PCA plot. This is contrary to what we want when assigning our samples to a cluster.
 
 ```{r removeBatchEffect tumor juxta + subtype model matrix}
 mat <- assay(vsd_remove_batch_tumor_juxta_subtype)
+# create model matrix
 mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd_remove_batch_tumor_juxta_subtype))
 mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_tumor_juxta_subtype$Study, design = mm)
 assay(vsd_remove_batch_tumor_juxta_subtype) <- mat

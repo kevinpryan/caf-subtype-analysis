@@ -1,5 +1,5 @@
 #!/usr/bin/Rscript
-
+# Script to generate tx2gene file for given GTF file. Useful if tximeta does not have your version of the gtf file
 library(optparse)
 suppressPackageStartupMessages(library(GenomicFeatures))
 
@@ -21,7 +21,7 @@ if (length(opt) < 2){
 
 opt$gtf -> gtf_file
 opt$out -> outfile
-
+# read in gtf/gff file as TxDb object
 txdb <- makeTxDbFromGFF(file=gtf_file)
 k <- keys(txdb, keytype = "TXNAME")
 tx2gene <- select(txdb, k, "GENEID", "TXNAME")

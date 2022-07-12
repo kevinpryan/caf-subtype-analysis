@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-11 19:18:25
+2022-07-12 20:52:26
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -12,6 +12,9 @@ Kevin Ryan
             with tximeta and create DESeq object</a>
         -   <a href="#data-transformation" id="toc-data-transformation">Data
             transformation</a>
+        -   <a href="#qc---pca-per-study-for-outlier-detection"
+            id="toc-qc---pca-per-study-for-outlier-detection">QC - PCA per study for
+            outlier detection</a>
         -   <a href="#batch-correction" id="toc-batch-correction">Batch
             correction</a>
     -   <a
@@ -60,9 +63,9 @@ The following summarises the data obtained:
 <thead>
 <tr class="header">
 <th>Subpopulation</th>
-<th>| Total sam</th>
-<th>ples | Studies (Samples)</th>
-<th>| Notes</th>
+<th>Total samples</th>
+<th>Studies (Samples)</th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
@@ -239,6 +242,7 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
                       Subtype = metadata$Subtype, 
                       Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
                       stringsAsFactors=FALSE)
+# tx2gene file for the gencode v31 file used in the analysis
 tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
 ```
 
@@ -276,7 +280,7 @@ dim(dds)
     ## [1] 60603   113
 
 ``` r
-# returns a vector of whether the total count of each gene is >= 10 (True or fals)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
 keep <- rowSums(counts(dds)) >= 10
 # only keep rows (genes) for which keep is TRUE
 dds <- dds[keep,]
@@ -315,16 +319,6 @@ dds <- DESeq(dds)
 
     ## fitting model and testing
 
-``` r
-ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
-                  Subtype = c(S1 = "dodgerblue4", S3 = "chartreuse1", S4 = "grey67", Unknown = "palevioletred"),
-                  Tumor_JuxtaTumor = c(tumor = "royalblue", juxtatumor = "red")
-                  )
-```
-
-From the heatmap, we can see that there are batch effects present which
-must be dealt with.
-
 ### Data transformation
 
 There are a number of options to choose from when normalising RNA-seq
@@ -335,7 +329,7 @@ pseudocount. - Variance stabilizing transformation (Anders and Huber
 
 The log+pseudocount approach tends to mean that lowly expressed genes
 have more of an effect. *Vst* and *rlog* bring these counts towards a
-middle amount, making the data more homoskedastic. This allows them to
+central amount, making the data more homoskedastic. This allows them to
 be used in downstream processes which require homoskedastic data
 (e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes
 such as ours as it is much faster than *rlog*
@@ -375,11 +369,87 @@ ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
   coord_fixed() + facet_grid( . ~ transformation)  
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 There doesn’t seem to much of a difference between the two methods of
 normalisation, only that the lowly expressed genes have been brought up
 to a minimum of \~4.
+
+### QC - PCA per study for outlier detection
+
+``` r
+#studies <- levels(colData(vsd)$Study)
+# write a function which takes in DESeq object & creates PCA of all studies
+deseq_pca_studies <- function(dds_object){
+  library(PCAtools)
+  library(ggplot2)
+  studies <- levels(colData(dds_object)$Study)
+  pca_plots <- list()
+  for (i in 1:length(studies)){
+    study <- studies[i]
+    samples <- colnames(dds_object)[which(colData(dds_object)$Study == study)]
+    dds_object_study <- dds_object[,samples]
+    stopifnot(dim(dds_object_study)[2] == length(samples))
+    pca_plot_data <- plotPCA(dds_object_study, intgroup = c("Subtype", "Tumor_JuxtaTumor"), returnData = TRUE)
+    percentVar <- round(100 * attr(pca_plot_data, "percentVar"))
+    title <- paste("PCA plot of study:", study, sep = " ")
+    #plot_labels <- rownames(pca_plot_data)
+    #print(samples)
+    #print(length(samples))
+    pca_plot_data$samples <- rownames(pca_plot_data)
+    pca_plot <- ggplot(pca_plot_data, aes(x = PC1, y = PC2, color = Subtype, shape = Tumor_JuxtaTumor, label = samples)) +
+                geom_point(size =3) +
+                geom_text(hjust="middle", vjust=1, data = subset(pca_plot_data, PC2 > 22)) +
+                xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+                ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+                coord_fixed() +
+                ggtitle(title)
+    pca_plots[[i]] <- pca_plot
+    #print(pca_plots[i])
+  }
+  #stopifnot(length(pca_plots) == length(studies))
+  return(pca_plots)
+}
+```
+
+``` r
+output <- deseq_pca_studies(vsd)
+output
+```
+
+    ## [[1]]
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+
+    ## 
+    ## [[2]]
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-2.png)<!-- -->
+
+    ## 
+    ## [[3]]
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-3.png)<!-- -->
+
+    ## 
+    ## [[4]]
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-4.png)<!-- -->
+
+    ## 
+    ## [[5]]
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-6-5.png)<!-- -->
+
+``` r
+#output
+```
+
+``` r
+plotPCA(vsd, intgroup = c("Study", "Subtype"))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ### Batch correction
 
@@ -419,7 +489,7 @@ pheatmap(mat=sampleDistMatrix,
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
 pcaData <- plotPCA(vsd, intgroup = c("Study", "Subtype"), returnData = TRUE)
@@ -435,7 +505,7 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subtype)) +
   ggtitle("PCA with VST data")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
 Next step is to look at batch correction.
 
@@ -444,17 +514,6 @@ Next step is to look at batch correction.
 ``` r
 library(limma)
 ```
-
-    ## 
-    ## Attaching package: 'limma'
-
-    ## The following object is masked from 'package:DESeq2':
-    ## 
-    ##     plotMA
-
-    ## The following object is masked from 'package:BiocGenerics':
-    ## 
-    ##     plotMA
 
 ``` r
 vsd_remove_batch_intercept <- vsd
@@ -499,13 +558,15 @@ pheatmap(mat=sampleDistMatrix,
 Limma’s removeBatchEffect function requires a design matrix as input,
 this is the “treatment conditions” we wish to preserve. It is usually
 the design matrix with all experimental factors other than batch
-effects. I do not know whether to include Subtype in this matrix, as
-this treats `Unknown` as its own subtype, and so will preserve
+effects. The ideal scenario would be to include Subtype in this matrix.
+However, this treats `Unknown` as its own subtype, and so will preserve
 differences between the InHouse samples and the other samples, as seen
-in the below PCA plot.
+in the below PCA plot. This is contrary to what we want when assigning
+our samples to a cluster.
 
 ``` r
 mat <- assay(vsd_remove_batch_tumor_juxta_subtype)
+# create model matrix
 mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd_remove_batch_tumor_juxta_subtype))
 mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_tumor_juxta_subtype$Study, design = mm)
 ```
@@ -597,7 +658,7 @@ ggplot(p$rotated, aes(x = PC1, y = PC2, color = p$metadata$Study, shape = p$meta
   ggtitle("PCA with transormed data after batch correction")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
 ``` r
 batch <- coldata$Study
@@ -649,16 +710,16 @@ tab
 
     ##     caf_test_category
     ## pr   S1 S3 S4
-    ##   S1  2  3  3
+    ##   S1  4  2  3
     ##   S3  0  0  0
-    ##   S4  0  0  1
+    ##   S4  0  0  0
 
 ``` r
 accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
  accuracy(tab)
 ```
 
-    ## [1] 33.33333
+    ## [1] 44.44444
 
 ``` r
   outputs <- c()
@@ -675,7 +736,7 @@ for (i in 1:50){
 plot(outputs)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-21-1.png)<!-- -->
 
 ``` r
   prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
