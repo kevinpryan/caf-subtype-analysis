@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Introduction
 
-Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the tumour microenvironment. They have a wide array of functions, and tend to be immunosuppressive and cancer-promoting. There have been many attempts to characterise subtypes of CAFs, with much transcriptomic analysis being carried out in the Mechta-Grigoriou lab in Institut Curie. They have identified 4 'subtypes' which can be separated based on the expression of different markers:
+Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the tumour microenvironment. They have a wide array of functions, and tend to be immunosuppressive and cancer-promoting. There have been many attempts to characterise subpopulations of CAFs, with much transcriptomic analysis being carried out in the Mechta-Grigoriou lab in Institut Curie. They have identified 4 'subpopulations' which can be separated based on the expression of different markers:
 
  -  S1: FAP^High^, CD29^Med-High^, α^SMAHigh^, PDPN^High^, PDGFRβ^High^
  -  S2: FAP^Neg^, CD29^Low^, αSMANeg-^Low^, PDPN^Low^, PDGFRβ^Low^
@@ -24,7 +24,7 @@ Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the 
 
 [@Pelon2020]
 
-FACS gating strategies can be used to isolate these various subtypes. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subtypes. They generated scRNA-sequencing data for the S1 subtype. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
+FACS gating strategies can be used to isolate these various subpopulations. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated scRNA-sequencing data for the S1 subpopulation. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
 
 The following summarises the data obtained:
 
@@ -48,6 +48,8 @@ The following summarises the data obtained:
 With the juxta-tumour data, they got tumour and juxta-tumour data from the same patient. However, I have not been able to figure out whether they came from the same patient. Could probably use Optitype to determine HLA allele - match tumour and juxta tumour.
 
 We also have scRNA-seq data for S1.
+
+It is likely that sorting the cells using FACS alters the transcriptional properties of the cells compared to if they are separated using spreading approches, as is seen in study `EGAD00001006144`. This is something that we will have to keep in mind.
 
 The data was processed using nf-core/rnaseq version `3.8.1` using the default parameters. STAR/Salmon were used for alignment/quantification.
 
@@ -82,6 +84,8 @@ library(pheatmap)
 library(RColorBrewer)
 library(glmpca)
 library(hexbin)
+suppressPackageStartupMessages(library(IHW))
+httr::set_config(httr::config(ssl_verifypeer = FALSE))
 ```
 
 ```{r read in metadata}
@@ -144,6 +148,10 @@ metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta,
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
 metadata$Tumor_JuxtaTumor <- gsub(x = metadata$Tumor_JuxtaTumor, pattern = "-", replacement = "")
 metadata[1:5,]
+metadata_no_inhouse <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
+                             EGAD_6144_meta, EGAD_5744_meta)
+metadata_no_inhouse$Tumor_JuxtaTumor <- gsub(x = metadata_no_inhouse$Tumor_JuxtaTumor, pattern = "-", replacement = "")
+
 ```
 
 ### Read in data with tximeta and create DESeq object
@@ -163,10 +171,37 @@ tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.tx
 se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
 ```
 
+```{r read in data without inhouse}
+files_no_inhouse <- file.path(metadata_no_inhouse$directory, rownames(metadata_no_inhouse), "quant.sf")
+coldata_no_inhouse <- data.frame(files = files_no_inhouse, names=rownames(metadata_no_inhouse), Study = metadata_no_inhouse$Study, 
+                      Subtype = metadata_no_inhouse$Subtype, 
+                      Tumor_JuxtaTumor = metadata_no_inhouse$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+# tx2gene file for the gencode v31 file used in the analysis
+#tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
+se_no_inhouse <- tximeta(coldata = coldata_no_inhouse, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+```
 
 ```{r Apply common filters according to DESeq2 vignette to remove lowly expressed genes}
-dds <- DESeqDataSet(se, design = ~ Study)
-dim(dds)
+# do no design for the time being, Subtype + Batch gives error - model matrix not full rank
+# this function stores input values, intermediate calculations and results of DE analysis - makes counts non-negative integers
+dds_no_inhouse <- DESeqDataSet(se_no_inhouse, design = ~1)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds_no_inhouse)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds_no_inhouse <- dds_no_inhouse[keep,]
+# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
+X <- 7
+keep <- rowSums(counts(dds_no_inhouse) >= 10) >= X
+dds_no_inhouse <- dds_no_inhouse[keep,]
+dds_no_inhouse_copy <- dds_no_inhouse
+ntd <- normTransform(dds_no_inhouse)
+```
+
+```{r}
+# do no design for the time being, Subtype + Batch gives error - model matrix not full rank
+# this function stores input values, intermediate calculations and results of DE analysis - makes counts non-negative integers
+dds <- DESeqDataSet(se, design = ~1)
 # returns a vector of whether the total count of each gene is >= 10 (True or false)
 keep <- rowSums(counts(dds)) >= 10
 # only keep rows (genes) for which keep is TRUE
@@ -178,10 +213,558 @@ dds <- dds[keep,]
 ntd <- normTransform(dds)
 ```
 
+
+```{r}
+suppressPackageStartupMessages(library(sva))
+dds_no_inhouse <- DESeq(dds_no_inhouse)
+dat  <- counts(dds_no_inhouse, normalized = TRUE)
+idx  <- rowMeans(dat) > 1
+dat  <- dat[idx, ]
+# we have subtype and tumour-juxtatomour in the model matrix
+mod  <- model.matrix(~ Subtype + Tumor_JuxtaTumor, colData(dds_no_inhouse))
+mod0 <- model.matrix(~   1, colData(dds_no_inhouse))
+svseq <- svaseq(dat, mod, mod0, n.sv = 4)
+```
+```{r}
+#svseq$sv
+par(mfrow = c(4, 1), mar = c(3,5,3,1))
+for (i in 1:4) {
+  stripchart(svseq$sv[, i] ~ dds_no_inhouse$Study, vertical = TRUE, main = paste0("SV", i))
+  abline(h = 0)
+ }
+```
+
+```{r}
+dds_no_inhouse$SV1 <- as.factor(svseq$sv[,1])
+dds_no_inhouse$SV2 <- as.factor(svseq$sv[,2])
+dds_no_inhouse$SV3 <- as.factor(svseq$sv[,3])
+dds_no_inhouse$SV4 <- as.factor(svseq$sv[,4])
+dds_no_inhouse$Subtype <- as.factor(dds_no_inhouse$Subtype)
+dds_no_inhouse$Tumor_JuxtaTumor <- as.factor(dds_no_inhouse$Tumor_JuxtaTumor)
+design(dds_no_inhouse) <- ~ 1
+
+```
+
+```{r}
+dds_no_inhouse_deseq <- DESeq(dds_no_inhouse)
+```
+
+
+
+
+```{r}
+metadata_subtype_study <- data.frame(metadata$Study, metadata$Subtype)
+```
+
+
 ```{r Create DESeq object}
 dds <- DESeq(dds)
 ```
 
+```{r get HGNC symbols for genes}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+ensembl_ids <- rownames(assay(dds))
+ensembl_ids <- str_split_fixed(ensembl_ids, pattern = "\\.", n = 2)[,1]
+info <- getBM(attributes=c("hgnc_symbol",
+                           "ensembl_gene_id"),
+                  filters = c("ensembl_gene_id"),
+                  values = ensembl_ids,
+                  mart = mart,
+                  useCache=FALSE)
+
+#rownames(info) <- info$hgnc_symbol
+```
+Source: GeneCards
+ -  ITGB1 (CD29) is an integrin, integrins are involved in cell-cell and cell-ECM adhesion. It is expressed in 3 of the 4 subpopulations (not S2).
+ -  FAP is Fibroblast activation protein, a serine proteinase, selectively expressed in reactive stromal fibroblasts in epithelial cancers, expression should be highest in S1 population. Roles include: tissue remodelling, fibrosis, wound healing.
+ -  α^SMA - ACTA2, alpha smooth muscle actin is involved in cell motility, structure, integrity and signalling. Its expression is highest in S1 and S4 CAFs.
+ -  PDPN (podoplanin) increases cell motility. It should only be expressed in S1 cells.
+ -  PDGFRβ (Platelet Derived Growth Factor Receptor Beta) is a tyrosine kinase receptor for platelet-derived growth factors. They stimulate mitosis of cells of mesenchymal origin. Expression should be highest in S1, some expression in S3 and S4.
+ 
+There are other possible genes which could be used to distinguish them through manual curation: FSP1, CAV1, DPP4
+ 
+```{r Look for expression of genes used to FACS sort cells}
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+info_unique <- info[!duplicated(info$hgnc_symbol),]
+rownames(info_unique) <- info_unique$hgnc_symbol
+genes_interest_info <- info_unique[genes_interest,] 
+ensembl_genes_dds <- str_split_fixed(rownames(assay(dds)), pattern = "\\.", n = 2)[,1]
+dds_replicated <- dds
+ids <- which(ensembl_genes_dds %in% genes_interest_info$ensembl_gene_id)
+dds_genes_interest <- dds[ids,]
+dds_genes_interest_exprs <- data.frame(assay(dds_genes_interest))
+colnames(dds_genes_interest_exprs) <- rownames(metadata)
+rownames(dds_genes_interest_exprs) <- genes_interest
+```
+
+```{r}
+dds_genes_interest_exprs_t <- as.data.frame(t(dds_genes_interest_exprs))
+dds_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
+dds_genes_interest_exprs_t$Study <- metadata$Study
+dds_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
+```
+
+
+```{r}
+fap_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP, color = Tumor_JuxtaTumor, shape = Study)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+itgb1_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = ITGB1, color = Tumor_JuxtaTumor, shape = Study)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+acta2_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = ACTA2, color = Tumor_JuxtaTumor, shape = Study)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+pdpn_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = PDPN, color = Tumor_JuxtaTumor, shape = Study)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+pdgfrb_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = PDGFRB, color = Tumor_JuxtaTumor, shape = Study)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"),
+legend.key.size = unit(0.25, 'cm'),
+legend.title = element_text(size=10), #change legend title font size
+
+)
+
+p <- plot_grid(fap_plot + theme(legend.position = "none"), 
+               itgb1_plot + theme(legend.position = "none") , 
+               acta2_plot + theme(legend.position = "none"), 
+               pdpn_plot + theme(legend.position = "none"), 
+               pdgfrb_plot, #+ theme(legend.position = "none"), 
+               ncol=3, 
+               labels=LETTERS[1:5])
+#legend <- get_legend(
+  # create some space to the left of the legend
+ # fap_plot + theme(legend.box.margin = margin(0, 0, 0,12))
+#)
+# look again at what this is
+title <- ggdraw() + draw_label("Unnormalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+#plot_grid(title, p, legend, ncol=1, rel_heights=c(0.1, 0.5), rel_widths = 1, 1) # rel_heights values control title margins
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
+
+```
+
+```{r}
+library(ggpubr)
+caf_plot_function_tumour_juxtatumour <- function(input_table, gene_of_interest){
+  input_table$gene_of_interest <- input_table[, gene_of_interest]
+  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
+}
+#caf_plot_function(dds_genes_interest_exprs_t, gene_of_interest = "FAP")
+plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = dds_genes_interest_exprs_t)
+plots_out
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_annotated
+```
+
+```{r}
+library(ggpubr)
+caf_plot_function_study <- function(input_table, gene_of_interest){
+  input_table$gene_of_interest <- input_table[, gene_of_interest]
+  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Study)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
+}
+plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = dds_genes_interest_exprs_t)
+plots_out
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_annotated
+```
+
+```{r Make plot for vsd data}
+vsd <- vst(dds, blind = FALSE)
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+info_unique <- info[!duplicated(info$hgnc_symbol),]
+rownames(info_unique) <- info_unique$hgnc_symbol
+genes_interest_info <- info_unique[genes_interest,] 
+ensembl_genes_vsd <- str_split_fixed(rownames(assay(vsd)), pattern = "\\.", n = 2)[,1]
+#dds_replicated <- dds
+ids <- which(ensembl_genes_vsd %in% genes_interest_info$ensembl_gene_id)
+vsd_genes_interest <- vsd[ids,]
+vsd_genes_interest_exprs <- data.frame(assay(vsd_genes_interest))
+colnames(vsd_genes_interest_exprs) <- rownames(metadata)
+rownames(vsd_genes_interest_exprs) <- genes_interest
+vsd_genes_interest_exprs_t <- as.data.frame(t(vsd_genes_interest_exprs))
+vsd_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
+vsd_genes_interest_exprs_t$Study <- metadata$Study
+vsd_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
+fap_plot <- ggplot(vsd_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+itgb1_plot <- ggplot(vsd_genes_interest_exprs_t, aes(x = Subpopulation, y = ITGB1)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+acta2_plot <- ggplot(vsd_genes_interest_exprs_t, aes(x = Subpopulation, y = ACTA2)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+pdpn_plot <- ggplot(vsd_genes_interest_exprs_t, aes(x = Subpopulation, y = PDPN)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+pdgfrb_plot <- ggplot(vsd_genes_interest_exprs_t, aes(x = Subpopulation, y = PDGFRB)) +
+  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+p <- plot_grid(fap_plot, itgb1_plot, acta2_plot, pdpn_plot, pdgfrb_plot, ncol=3, labels=LETTERS[1:5])
+title <- ggdraw() + draw_label("VSD normalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
+```
+
+```{r}
+plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = vsd_genes_interest_exprs_t)
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE, legend = "right") # rel_heights values control title margins
+title <- ggdraw() + draw_label("VSD normalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"), top = text_grob("VSD normalised expression of marker genes\naccording to CAF subpopulation", color = "black", face = "bold", size = 10))
+ggar_obj_annotated
+
+plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = vsd_genes_interest_exprs_t)
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE, legend = "right") # rel_heights values control title margins
+title <- ggdraw() + draw_label("VSD normalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"), top = text_grob("VSD normalised expression of marker genes\naccording to CAF subpopulation", color = "black", face = "bold", size = 10))
+ggar_obj_annotated
+```
+
+```{r}
+library(purrr)
+#summarised_data <- vsd_genes_interest_exprs_t %>% split(.$Subtype) %>% map(summary)
+#summarised_data$S1
+```
+Per Gene, do the data line up with what we would expect?
+ -  FAP, S1 = high, would expect it to be lower in S3 than S4, they are roughly the same. Unknown subtype, high, tight confidence
+ -  ITGB1 (CD29), very similar across all subtypes. This is as expected - it is thought to not be expressed only in S2 which we don't have.
+ -  ACTA2 (alphaSMA), very similar across all subpopulations. We would expect the expression to be lowest in the S3 subpopulation but we don't see that here.
+ -  PDPN - expression highest in unknown samples, similar but lower in other subpopulations. Slightly higher in S1 than S3 and S4 - supposed to be expressed only in S1! Post-transcriptional regulation??? Seems to undergo post-translational regulation - https://www.spandidos-publications.com/10.3892/ijo.2013.1887#b53-ijo-42-06-1849 it is possible that differences won't be seen here on the mRNA level.
+ -  PDGFRB - highest in S1, as expected. Expression in our unknown similar to S3 and S4.
+
+
+ -  Carry out batch correction on reduced dataset, tumour_juxtatumour and subtype as model matrix
+ -  Plot genes
+ -  DE analysis
+ 
+```{r}
+library(sva)
+counts_matrix <- assay(dds_no_inhouse_copy)
+batch <- metadata_no_inhouse$Study
+covariates <- metadata_no_inhouse$Tumor_JuxtaTumor
+  #Subpopulation = metadata_no_inhouse$Subtype)
+                        
+adjusted <- ComBat_seq(counts = counts_matrix, batch = batch, group = covariates)
+```
+```{r}
+ensembl_ids <- rownames(adjusted)
+ensembl_ids <- str_split_fixed(ensembl_ids, pattern = "\\.", n = 2)[,1]
+info <- getBM(attributes=c("hgnc_symbol",
+                           "ensembl_gene_id"),
+                  filters = c("ensembl_gene_id"),
+                  values = ensembl_ids,
+                  mart = mart,
+                  useCache=FALSE)
+```
+```{r}
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+info_unique <- info[!duplicated(info$hgnc_symbol),]
+rownames(info_unique) <- info_unique$hgnc_symbol
+genes_interest_info <- info_unique[genes_interest,] 
+ids <- which(ensembl_ids %in% genes_interest_info$ensembl_gene_id)
+adjusted_genes_interest <- adjusted[ids,]
+colnames(adjusted_genes_interest) <- rownames(metadata_no_inhouse)
+rownames(adjusted_genes_interest) <- genes_interest
+```
+
+```{r}
+adjusted_genes_interest_exprs_t <- as.data.frame(t(adjusted_genes_interest))
+adjusted_genes_interest_exprs_t$Subpopulation <- metadata_no_inhouse$Subtype
+adjusted_genes_interest_exprs_t$Study <- metadata_no_inhouse$Study
+adjusted_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata_no_inhouse$Tumor_JuxtaTumor
+```
+
+```{r}
+plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = adjusted_genes_interest_exprs_t)
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE, legend = "right") # rel_heights values control title margins
+title <- ggdraw() + draw_label("Batch-corrected expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"), top = text_grob("VSD normalised expression of marker genes\naccording to CAF subpopulation", color = "black", face = "bold", size = 10))
+ggar_obj_annotated
+
+plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = adjusted_genes_interest_exprs_t)
+ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE, legend = "right") # rel_heights values control title margins
+title <- ggdraw() + draw_label("Batch-corrected expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"), top = text_grob("VSD normalised expression of marker genes\naccording to CAF subpopulation", color = "black", face = "bold", size = 10))
+ggar_obj_annotated
+```
+
+ -  Carry out batch correction between studies, cannot account for differences in subpopulations here
+ -  Differential expression analysis CAF vs TAN
+ -  We cannot include patient in the formula here as we don't have matched CAF TAN
+
+```{r}
+counts_matrix_all <- assay(dds)
+batch_all <- metadata$Study
+covariates_all <- metadata$Tumor_JuxtaTumor
+  #Subpopulation = metadata_no_inhouse$Subtype)
+                        
+adjusted_all <- ComBat_seq(counts = counts_matrix_all, batch = batch_all, group = covariates_all)
+```
+
+```{r}
+# have to divide everything by 10 because the max digit is ~10x the max machine integer
+dds_adjusted_all <- DESeqDataSetFromMatrix(countData = round(adjusted_all/10), colData = metadata, design = ~ Study + Tumor_JuxtaTumor)
+dds_adjusted_all$Tumor_JuxtaTumor <- relevel(dds_adjusted_all$Tumor_JuxtaTumor, ref = "juxtatumor")
+dds_adjusted_all <- DESeq(dds_adjusted_all)
+```
+
+### Differentially Expressed Genes CAF vs TAN (Tumor vs Juxta-Tumor)
+
+```{r Functions for extracting DE results}
+get_upregulated <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange>=1)], rownames(df)[which(df$padj<=0.05)])
+
+  results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+get_downregulated <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange<=-1)], rownames(df)[which(df$padj<=0.05)])
+
+    results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+annotate_de_genes <- function(df, filter_by){
+    # if your df has hgnc_symbol as rowmaes, filter by that, if it is the ENSG1234.12, use "ensembl_gene_id_version", if it is the regular engs, filter by "ensembl_gene_id"
+    filter_by_string <- as.character(filter_by)
+    df$gene_symbol <- rownames(df)
+    colnames(df)[6] <- filter_by_string
+    #print(df)
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description"),
+                  filters = c(filter_by_string),
+                  values = df[,6],
+                  mart = mart,
+                  useCache=FALSE)
+
+    tmp <- merge(df, info, by=filter_by_string)
+    tmp$strand <- gsub("-1", "-", tmp$strand)
+    tmp$strand <- gsub("1", "+", tmp$strand)
+    #tmp$hgnc_symbol <- make.names(tmp$hgnc_symbol, unique = T)
+    tmp <- tmp[!grepl("CHR", tmp$chromosome_name),]
+
+    output_col <- c("Gene", "Ensembl ID", "Chromosome", "Start", "Stop", "Strand", "Description", "Log2FC", "P-value", "Adj P-value")
+    tmp <- subset(tmp, select=c(hgnc_symbol, ensembl_gene_id_version, chromosome_name, start_position, end_position, strand, entrezgene_description, log2FoldChange, pvalue, padj))
+    colnames(tmp) <- output_col
+
+    if(min(tmp$Log2FC) > 0){
+        tmp <- tmp[order(-tmp$Log2FC),]
+    }else{
+        tmp <- tmp[order(tmp$Log2FC),]
+    }
+
+    return(tmp)
+
+}
+```
+
+```{R, message=F, warning=F}
+dds <- dds_adjusted_all
+res <- results(dds, filterFun = ihw, alpha = 0.05, c("Tumor_JuxtaTumor", "tumor", "juxtatumor"))
+lfc <- lfcShrink(dds = dds, res = res, coef = 6, type = "apeglm")
+lfc_df <- as.data.frame(lfc)
+
+up <- get_upregulated(lfc_df)
+down <- get_downregulated(lfc_df)
+
+up <- annotate_de_genes(up, filter_by = "ensembl_gene_id_version")
+down <- annotate_de_genes(down, filter_by = "ensembl_gene_id_version")
+```
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+master_lfc1 <- rbind(up,down)
+# want to create 'background' gene set entrez id + LFC values for all genes
+info <- getBM(attributes = c("hgnc_symbol", "entrezgene_id", "ensembl_gene_id_version"),
+              mart=mart, filters = "ensembl_gene_id_version", values = rownames(lfc_df))
+
+lfc_df$Gene <- rownames(lfc_df)
+tmp <- merge(info, lfc_df, by.x="ensembl_gene_id_version", by.y="Gene")
+
+background <- tmp$log2FoldChange
+names(background) <- tmp$hgnc_symbol
+background <- sort(background, decreasing = TRUE)
+
+# make sure you have all DEGs here (LFC > 1 and pval cutoff i.e maser_lfc1 genes)
+degtmp <- subset(tmp, tmp$hgnc_symbol %in% master_lfc1$Gene)
+deg <- degtmp$entrezgene_id
+deg <- na.omit(deg)
+
+#deg.df <- bitr(deg, fromType = "ENTREZID",
+ #               toType = c("ENSEMBL", "SYMBOL"),
+  #              OrgDb = org.Hs.eg.db)
+```
+
+#### Hallmarks GSEA
+
+```{r}
+hmarks <- read.gmt("~/Downloads/h.all.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=hmarks,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+
+#DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+```{R, message=F, warning=F, fig.height=5, fig.width=7}
+dotplot(egmt, title = "GSEA HALLMARKS", x="NES")
+```
+
+### Enrichment plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+library(enrichplot)
+for(i in 1:nrow(egmt_df)){
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  plot(p)
+}
+```
+
+#### GO Biological Processes GSEA
+
+```{R,message=F, warning=F}
+gobp <- read.gmt("~/Downloads/c5.go.bp.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=gobp,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+#egmt_df$Description <- gsub("GOBP_", "", egmt_df$Description)
+#egmt_df$ID <- gsub("GOBP_", "", egmt_df$ID)
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+egmt_subs[1:5,]
+#DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+### Dot Plot
+
+```{R, message=F, warning=F, fig.height=10, fig.width=12}
+dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=30, font.size = 8)
+```
+
+### Enrichment Plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+for(i in 1:nrow(egmt_df)){
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  plot(p)
+}
+```
 ### Data transformation
 
 There are a number of options to choose from when normalising RNA-seq data, the main ones being:
@@ -255,8 +838,8 @@ deseq_pca_studies <- function(dds_object){
 ```
 
 ```{r}
-output <- deseq_pca_studies(vsd)
-output
+#output <- deseq_pca_studies(vsd)
+#output
 #output
 ```
 
