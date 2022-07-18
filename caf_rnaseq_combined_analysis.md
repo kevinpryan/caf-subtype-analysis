@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-18 12:33:32
+2022-07-18 18:23:18
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -28,6 +28,9 @@ Kevin Ryan
         href="#assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours"
         id="toc-assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours">Assigning
         in-house samples to a CAF subtype using K-nearest neighbours</a>
+        -   <a href="#deconvolution-using-cibersortx"
+            id="toc-deconvolution-using-cibersortx">Deconvolution using
+            CIBERSORTx</a>
     -   <a href="#references" id="toc-references">References</a>
 
 # Introduction
@@ -344,6 +347,132 @@ ntd <- normTransform(dds)
 ```
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
+
+``` r
+library(SummarizedExperiment)
+library(tibble)
+names = basename(dirname(coldata$files))
+txi = tximport(coldata$files, type = "salmon", txOut = TRUE)
+```
+
+    ## reading in files with read_tsv
+
+    ## 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113
+
+``` r
+se <- SummarizedExperiment(assays = list(txi[["counts"]], abundance = txi[["abundance"]], length = txi[["length"]]), colData = coldata)
+gi.s = summarizeToGene(txi, tx2gene = tx2gene,countsFromAbundance="scaledTPM")
+```
+
+    ## summarizing abundance
+    ## summarizing counts
+    ## summarizing length
+
+``` r
+gse.s = SummarizedExperiment(assays = list(counts = gi.s[["counts"]], abundance = gi.s[["abundance"]], length = gi.s[["length"]]),
+                                colData = coldata)
+abundance_tpm_data <- as.data.frame(assays(gse.s)[["abundance"]])
+colnames(abundance_tpm_data) <- coldata$names
+abundance_tpm_data_no_inhouse <- abundance_tpm_data[,colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse)]
+abundance_tpm_data_inhouse <- abundance_tpm_data[,!(colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse))]
+abundance_tpm_data_no_inhouse <- tibble::rownames_to_column(abundance_tpm_data_no_inhouse, "genes")
+abundance_tpm_data_inhouse <- tibble::rownames_to_column(abundance_tpm_data_inhouse, "genes")
+subtypes_labelled <- metadata_no_inhouse$Subtype
+colnames(abundance_tpm_data_no_inhouse)[-1] <- subtypes_labelled
+abundance_tpm_data_no_inhouse <- tibble(abundance_tpm_data_no_inhouse, .name_repair = "minimal")
+s1_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S1")
+s3_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S3")
+s4_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S4")
+abundance_tpm_data_no_inhouse_order <- tibble(genes = abundance_tpm_data_no_inhouse$genes, 
+                                              abundance_tpm_data_no_inhouse[,s1_cols], 
+                                              abundance_tpm_data_no_inhouse[,s3_cols],
+                                              abundance_tpm_data_no_inhouse[,s4_cols],
+                                              .name_repair = "minimal"
+                                              )
+abundance_tpm_data_no_inhouse_order[1:5,1:5]
+```
+
+    ## # A tibble: 5 × 5
+    ##   genes                 S1    S1      S1    S1
+    ##   <chr>              <dbl> <dbl>   <dbl> <dbl>
+    ## 1 ENSG00000000003.14 20.2  44.7  14.8     18.6
+    ## 2 ENSG00000000005.6   0     0     9.03     0  
+    ## 3 ENSG00000000419.12 63.6  49.0  90.2     72.7
+    ## 4 ENSG00000000457.14  2.98  3.25  3.04     0  
+    ## 5 ENSG00000000460.17  5.56  4.56  0.0417   0
+
+``` r
+#write.table(abundance_tpm_data_no_inhouse_order, 
+ #           file = "/home/kevin/Documents/PhD/cibersort/caf_subtypes_tpm_for_sig_matrix.txt", 
+  #          sep = "\t", quote = F,
+   #         row.names = F)
+#write.table(abundance_tpm_data_inhouse, 
+ #           file = "/home/kevin/Documents/PhD/cibersort/caf_tpm_mixture.txt", 
+  #          sep = "\t", quote = F,
+   #         row.names = F)
+```
+
+``` r
+s1_cols_length <- length(s1_cols)
+s3_cols_length <- length(s3_cols)
+s4_cols_length <- length(s4_cols)
+S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
+S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
+S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
+if (length(S1) != length(colnames(abundance_tpm_data_no_inhouse_order))-1){
+  stop("length s1 row incorrect")
+} else if (length(S3) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
+  stop("length s3 row incorrect")
+} else if (length(S4) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
+  stop("length s4 row incorrect")
+}
+out <- rbind.data.frame(S1, S3, S4)
+colnames(out) <- NULL
+row.names(out) <- c("S1", "S3", "S4")
+#write.table(out, file = "/home/kevin/Documents/PhD/cibersort/phenoclasses_caf.txt", sep = "\t", quote = F, col.names = F)
+```
+
+CIBERSORTx was run using the following command:
+
+    docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
+
+``` r
+cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
+cibersort_results
+```
+
+    ##    Mixture        S1 S3          S4 P.value Correlation      RMSE
+    ## 1     4033 0.9570748  0 0.042925205       0   0.7870899 0.6807551
+    ## 2     4034 1.0000000  0 0.000000000       0   0.8141137 0.6547153
+    ## 3     4027 0.8987753  0 0.101224730       0   0.7687020 0.6886350
+    ## 4     4028 1.0000000  0 0.000000000       0   0.7829962 0.7051913
+    ## 5     4112 0.9903751  0 0.009624853       0   0.8377707 0.6094339
+    ## 6     4113 1.0000000  0 0.000000000       0   0.8770761 0.5382961
+    ## 7     4116 0.9926897  0 0.007310301       0   0.8019636 0.6716308
+    ## 8     4117 1.0000000  0 0.000000000       0   0.8311613 0.6253372
+    ## 9     4214 0.9889958  0 0.011004172       0   0.8361520 0.6117524
+    ## 10    4215 1.0000000  0 0.000000000       0   0.8465000 0.5976711
+    ## 11    4315 0.9728492  0 0.027150776       0   0.8048235 0.6586261
+    ## 12    4316 1.0000000  0 0.000000000       0   0.8602991 0.5716391
+    ## 13    4340 0.9787148  0 0.021285151       0   0.8009182 0.6673828
+    ## 14    4341 0.9954915  0 0.004508522       0   0.8119521 0.6563516
+    ## 15    4344 0.9902103  0 0.009789743       0   0.7950935 0.6816636
+    ## 16    4345 0.9916468  0 0.008353235       0   0.7649171 0.7291115
+    ## 17    3532 0.9833313  0 0.016668715       0   0.7842058 0.6959260
+    ## 18    3533 1.0000000  0 0.000000000       0   0.8140856 0.6547627
+    ## 19    3536 0.9775435  0 0.022456479       0   0.7423141 0.7559936
+    ## 20    3537 1.0000000  0 0.000000000       0   0.7578456 0.7434883
+    ## 21    4299 0.9721026  0 0.027897353       0   0.8134793 0.6440161
+    ## 22    4300 1.0000000  0 0.000000000       0   0.8306485 0.6262410
+    ## 23    4722 0.7708237  0 0.229176322       0   0.8034468 0.6101486
+    ## 24    4723 0.9723284  0 0.027671590       0   0.7822037 0.6944232
+
+Results look strange with P-value of 9999. CIBERSORTx was run using the
+Docker image and using the GUI, and different results were obtained.
+When the Docker image was used and the number of permutations was
+changed from 0 to 100, the p-value changed to 0.000. The proportions
+look different between the two methods, with the GUI predicting about
+0.75 S1 with the rest being S4 for most samples.
 
 ``` r
 suppressPackageStartupMessages(library(sva))
@@ -1410,7 +1539,9 @@ vsd_remove_batch_tumor_juxta_only <- vsd
 
 ``` r
 mat <- assay(vsd_remove_batch_intercept)
+# only intercept term in model matrix, don't include Subtype or Tumor_JuxtaTumor
 mm <- model.matrix(~1, colData(vsd_remove_batch_intercept))
+# remove study batch effect
 mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_intercept$Study, design = mm)
 assay(vsd_remove_batch_intercept) <- mat
 pca_batch_correct_intercept <- plotPCA(vsd, intgroup = c("Subtype","Study")) + 
@@ -1453,7 +1584,7 @@ our samples to a cluster.
 
 ``` r
 mat <- assay(vsd_remove_batch_tumor_juxta_subtype)
-# create model matrix
+# create model matrix, full model matrix with Tumor_JuxtaTumor and Subtype
 mm <- model.matrix(~Tumor_JuxtaTumor+Subtype, colData(vsd_remove_batch_tumor_juxta_subtype))
 mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_tumor_juxta_subtype$Study, design = mm)
 ```
@@ -1634,7 +1765,15 @@ prediction
     ## Levels: S1 S3 S4
 
 They are all predicted to be S1 using this initial application of the
-algorithm. Possibly use interquartile range to improve performance?
+algorithm except one sample. Possibly use interquartile range to improve
+performance?
+
+### Deconvolution using CIBERSORTx
+
+Plan: Batch correct S1, S3 and S4 if possible, do not preserve
+differences between CAF and TAN. Create signature matrix for CIBERSORTx
+Possibly: TPM normalise, probably optional Run CIBERSORTx to figure out
+proportions of S1, S3 and S4 in In-house samples
 
 ## References
 
