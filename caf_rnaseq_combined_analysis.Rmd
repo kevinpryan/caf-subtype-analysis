@@ -148,6 +148,7 @@ metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta,
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
 metadata$Tumor_JuxtaTumor <- gsub(x = metadata$Tumor_JuxtaTumor, pattern = "-", replacement = "")
 metadata[1:5,]
+write.table(metadata, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/metadata_caf_subtypes.txt", quote = F, sep = "\t", row.names = T)
 metadata_no_inhouse <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta)
 metadata_no_inhouse$Tumor_JuxtaTumor <- gsub(x = metadata_no_inhouse$Tumor_JuxtaTumor, pattern = "-", replacement = "")
@@ -212,75 +213,8 @@ keep <- rowSums(counts(dds) >= 10) >= X
 dds <- dds[keep,]
 ntd <- normTransform(dds)
 ```
-```{r Get TPM expression for CIBERSORTx to make Signature matrix}
-library(SummarizedExperiment)
-library(tibble)
-names = basename(dirname(coldata$files))
-txi = tximport(coldata$files, type = "salmon", txOut = TRUE)
-se <- SummarizedExperiment(assays = list(txi[["counts"]], abundance = txi[["abundance"]], length = txi[["length"]]), colData = coldata)
-gi.s = summarizeToGene(txi, tx2gene = tx2gene,countsFromAbundance="scaledTPM")
-gse.s = SummarizedExperiment(assays = list(counts = gi.s[["counts"]], abundance = gi.s[["abundance"]], length = gi.s[["length"]]),
-                                colData = coldata)
-abundance_tpm_data <- as.data.frame(assays(gse.s)[["abundance"]])
-colnames(abundance_tpm_data) <- coldata$names
-abundance_tpm_data_no_inhouse <- abundance_tpm_data[,colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse)]
-abundance_tpm_data_inhouse <- abundance_tpm_data[,!(colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse))]
-abundance_tpm_data_no_inhouse <- tibble::rownames_to_column(abundance_tpm_data_no_inhouse, "genes")
-abundance_tpm_data_inhouse <- tibble::rownames_to_column(abundance_tpm_data_inhouse, "genes")
-subtypes_labelled <- metadata_no_inhouse$Subtype
-colnames(abundance_tpm_data_no_inhouse)[-1] <- subtypes_labelled
-abundance_tpm_data_no_inhouse <- tibble(abundance_tpm_data_no_inhouse, .name_repair = "minimal")
-s1_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S1")
-s3_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S3")
-s4_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S4")
-abundance_tpm_data_no_inhouse_order <- tibble(genes = abundance_tpm_data_no_inhouse$genes, 
-                                              abundance_tpm_data_no_inhouse[,s1_cols], 
-                                              abundance_tpm_data_no_inhouse[,s3_cols],
-                                              abundance_tpm_data_no_inhouse[,s4_cols],
-                                              .name_repair = "minimal"
-                                              )
-abundance_tpm_data_no_inhouse_order[1:5,1:5]
-#write.table(abundance_tpm_data_no_inhouse_order, 
- #           file = "/home/kevin/Documents/PhD/cibersort/caf_subtypes_tpm_for_sig_matrix.txt", 
-  #          sep = "\t", quote = F,
-   #         row.names = F)
-#write.table(abundance_tpm_data_inhouse, 
- #           file = "/home/kevin/Documents/PhD/cibersort/caf_tpm_mixture.txt", 
-  #          sep = "\t", quote = F,
-   #         row.names = F)
-```
 
-```{r Create pheno classes file}
-s1_cols_length <- length(s1_cols)
-s3_cols_length <- length(s3_cols)
-s4_cols_length <- length(s4_cols)
-S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
-S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
-S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
-if (length(S1) != length(colnames(abundance_tpm_data_no_inhouse_order))-1){
-  stop("length s1 row incorrect")
-} else if (length(S3) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
-  stop("length s3 row incorrect")
-} else if (length(S4) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
-  stop("length s4 row incorrect")
-}
-out <- rbind.data.frame(S1, S3, S4)
-colnames(out) <- NULL
-row.names(out) <- c("S1", "S3", "S4")
-#write.table(out, file = "/home/kevin/Documents/PhD/cibersort/phenoclasses_caf.txt", sep = "\t", quote = F, col.names = F)
-```
 
-CIBERSORTx was run using the following command:
-```
-docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
-```
-
-```{r CIBERSORT initial results}
-cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
-cibersort_results
-```
-
-Results look strange with P-value of 9999. CIBERSORTx was run using the Docker image and using the GUI, and different results were obtained. When the Docker image was used and the number of permutations was changed from 0 to 100, the p-value changed to 0.000. The proportions look different between the two methods, with the GUI predicting about 0.75 S1 with the rest being S4 for most samples.
 
 ```{r}
 suppressPackageStartupMessages(library(sva))
@@ -330,12 +264,11 @@ dds <- DESeq(dds)
 ```
 
 ```{r get HGNC symbols for genes}
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="useast.ensembl.org")
 ensembl_ids <- rownames(assay(dds))
 ensembl_ids <- str_split_fixed(ensembl_ids, pattern = "\\.", n = 2)[,1]
-info <- getBM(attributes=c("hgnc_symbol",
-                           "ensembl_gene_id"),
-                  filters = c("ensembl_gene_id"),
+info <- getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
+                  filters = "ensembl_gene_id",
                   values = ensembl_ids,
                   mart = mart,
                   useCache=FALSE)
@@ -351,38 +284,126 @@ Source: GeneCards
  
 There are other possible genes which could be used to distinguish them through manual curation: FSP1, CAV1, DPP4
  
-```{r Look for expression of genes used to FACS sort cells}
-genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
-info_unique <- info[!duplicated(info$hgnc_symbol),]
-rownames(info_unique) <- info_unique$hgnc_symbol
-genes_interest_info <- info_unique[genes_interest,] 
-ensembl_genes_dds <- str_split_fixed(rownames(assay(dds)), pattern = "\\.", n = 2)[,1]
-dds_replicated <- dds
-ids <- which(ensembl_genes_dds %in% genes_interest_info$ensembl_gene_id)
-dds_genes_interest <- dds[ids,]
-dds_genes_interest_exprs <- data.frame(assay(dds_genes_interest))
-colnames(dds_genes_interest_exprs) <- rownames(metadata)
-rownames(dds_genes_interest_exprs) <- genes_interest
-```
+```{r Plotting functions}
+# Function to take in dds object, ensembl - hgnc info and genes interest and output df for plotting
+create_annotated_df_for_plotting <- function(dds, info, genes_interest){
+  library(stringr)
+  # put check for type of gene symbol in dds object, assuming ensembl gene version atm
+  # assume info have column called hgnc_symbol
+  info <- info[!duplicated(info$hgnc_symbol),]
+  rownames(info) <- info$hgnc_symbol
+  # assuming genes interest are in info, put in check for this to deal with missing gene symbol
+  genes_interest_info <- info[genes_interest,] 
+  # again, here assuming ENSG1234.1 etc
+  ensembl_genes_dds <- str_split_fixed(rownames(assay(dds)), pattern = "\\.", n = 2)[,1]
+  ids <- which(ensembl_genes_dds %in% genes_interest_info$ensembl_gene_id)
+  dds_genes_interest <- dds[ids,]
+  dds_genes_interest_exprs <- data.frame(assay(dds_genes_interest))
+  metadata <- as.data.frame(colData(dds))
+  colnames(dds_genes_interest_exprs) <- rownames(metadata)
+  rownames(dds_genes_interest_exprs) <- genes_interest
+  dds_genes_interest_exprs_t <- as.data.frame(t(dds_genes_interest_exprs))
+  dds_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
+  dds_genes_interest_exprs_t$Study <- metadata$Study
+  dds_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
+  return(dds_genes_interest_exprs_t)
+}
 
-```{r}
-dds_genes_interest_exprs_t <- as.data.frame(t(dds_genes_interest_exprs))
-dds_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
-dds_genes_interest_exprs_t$Study <- metadata$Study
-dds_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
-```
-
-
-```{r}
-fap_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP, color = Tumor_JuxtaTumor, shape = Study)) +
-  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+caf_plot_tumour_juxtatumour <- function(annotated_df_for_plotting, gene_of_interest, label_yaxis = gene_of_interest){
+  if (is.null(label_yaxis)){
+    label_yaxis <- gene_of_interest
+  }
+  annotated_df_for_plotting$gene_of_interest <- annotated_df_for_plotting[, gene_of_interest]
+  ggplot(annotated_df_for_plotting, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
     position = position_jitter(
       width = 0.15,  # amount of jitter in horizontal direction
       height = 0     # amount of jitter in vertical direction (0 = none)
     )
   ) +
+  scale_y_continuous(gene_of_interest) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"))
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())  +
+    ylab(label_yaxis)  #, axis.title.x = element_blank())
+}
+
+caf_plot_study <- function(annotated_df_for_plotting, gene_of_interest, label_yaxis = gene_of_interest){
+  if (is.null(label_yaxis)){
+    label_yaxis <- gene_of_interest
+  }
+  annotated_df_for_plotting$gene_of_interest <- annotated_df_for_plotting[, gene_of_interest]
+  ggplot(annotated_df_for_plotting, aes(Subpopulation, gene_of_interest, colour = Study)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank()) +
+    ylab(label_yaxis)#
+}
+```
+
+```{r Prepare vsd object for plotting genes of interest}
+library(ggpubr)
+vsd <- vst(dds, blind = FALSE)
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+dds_genes_interest_exprs_t <- create_annotated_df_for_plotting(vsd, info = info, genes_interest = genes_interest)
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+caf_plot_study(df_for_plotting, gene_of_interest = "FAP")
+caf_plot_tumour_juxtatumour(df_for_plotting, gene_of_interest = "FAP")
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+ggar_obj_subpop_annotated
+```
+
+```{r Plot some other genes of interest}
+genes_interest <- c("CXCL12","TNFSF4","PDCD1LG2", "CD276", "NT5E", "DPP4", "CAV1", "ATL1")
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+ggar_obj_subpop_annotated
+```
+
+```{r Plot haemopoietic, epithelial and endothelial marker - should be low}
+# plotting original counts here, transformation 
+genes_interest <- c("PTPRC", "EPCAM", "PECAM1")
+genes_interest_common_name <- c("CD45", "EPCAM", "CD31")
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting, label_yaxis = genes_interest_common_name)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting, label_yaxis = genes_interest_common_name)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+ggar_obj_subpop_annotated
+```
+
+The low to zero counts of these genes are what we would expect.
+
+```{r}
+#fap_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP, color = Tumor_JuxtaTumor, shape = Study)) +
+ # geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+  #  position = position_jitter(
+   #   width = 0.15,  # amount of jitter in horizontal direction
+    #  height = 0     # amount of jitter in vertical direction (0 = none)
+  #  )
+#  ) +
+#  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#panel.background = element_blank(), axis.line = element_line(colour = "black"))
 
 itgb1_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = ITGB1, color = Tumor_JuxtaTumor, shape = Study)) +
   geom_point(size = 0.75,  # reduce point size to minimize overplotting 
@@ -428,50 +449,39 @@ legend.title = element_text(size=10), #change legend title font size
 
 )
 
-p <- plot_grid(fap_plot + theme(legend.position = "none"), 
-               itgb1_plot + theme(legend.position = "none") , 
-               acta2_plot + theme(legend.position = "none"), 
-               pdpn_plot + theme(legend.position = "none"), 
-               pdgfrb_plot, #+ theme(legend.position = "none"), 
-               ncol=3, 
-               labels=LETTERS[1:5])
+#p <- plot_grid(fap_plot + theme(legend.position = "none"), 
+ #              itgb1_plot + theme(legend.position = "none") , 
+  #             acta2_plot + theme(legend.position = "none"), 
+   #            pdpn_plot + theme(legend.position = "none"), 
+    #           pdgfrb_plot, #+ theme(legend.position = "none"), 
+     #          ncol=3, 
+      #         labels=LETTERS[1:5])
 #legend <- get_legend(
   # create some space to the left of the legend
  # fap_plot + theme(legend.box.margin = margin(0, 0, 0,12))
 #)
 # look again at what this is
-title <- ggdraw() + draw_label("Unnormalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+#title <- ggdraw() + draw_label("Unnormalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
 #plot_grid(title, p, legend, ncol=1, rel_heights=c(0.1, 0.5), rel_widths = 1, 1) # rel_heights values control title margins
-plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
+#plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
 
 ```
 
 ```{r}
 library(ggpubr)
-caf_plot_function_tumour_juxtatumour <- function(input_table, gene_of_interest){
-  input_table$gene_of_interest <- input_table[, gene_of_interest]
-  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
-  geom_point(size = 1,  # reduce point size to minimize overplotting 
-    position = position_jitter(
-      width = 0.15,  # amount of jitter in horizontal direction
-      height = 0     # amount of jitter in vertical direction (0 = none)
-    )
-  ) +
-  scale_y_continuous(gene_of_interest) +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
-}
+# input table - row sample, col genes
+
 #caf_plot_function(dds_genes_interest_exprs_t, gene_of_interest = "FAP")
-plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = dds_genes_interest_exprs_t)
-plots_out
-ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
-ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
-ggar_obj_annotated
+#plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = dds_genes_interest_exprs_t)
+#plots_out
+#ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
+#ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
+#ggar_obj_annotated
 ```
 
-```{r}
-library(ggpubr)
+```{r Define plotting functions}
 caf_plot_function_study <- function(input_table, gene_of_interest){
+  library(ggplot2)
   input_table$gene_of_interest <- input_table[, gene_of_interest]
   ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Study)) +
   geom_point(size = 1,  # reduce point size to minimize overplotting 
@@ -484,16 +494,35 @@ caf_plot_function_study <- function(input_table, gene_of_interest){
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
 panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
 }
+
+caf_plot_function_tumour_juxtatumour <- function(input_table, gene_of_interest){
+  library(ggplot2)
+  input_table$gene_of_interest <- input_table[, gene_of_interest]
+  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
+}
+
+```
+
+```{r}
+library(ggpubr)
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
 plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = dds_genes_interest_exprs_t)
-plots_out
 ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
 ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
 ggar_obj_annotated
 ```
 
 ```{r Make plot for vsd data}
-vsd <- vst(dds, blind = FALSE)
-genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+#vsd <- vst(dds, blind = FALSE)
 info_unique <- info[!duplicated(info$hgnc_symbol),]
 rownames(info_unique) <- info_unique$hgnc_symbol
 genes_interest_info <- info_unique[genes_interest,] 
@@ -574,6 +603,13 @@ ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE, legend = "righ
 title <- ggdraw() + draw_label("VSD normalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
 ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"), top = text_grob("VSD normalised expression of marker genes\naccording to CAF subpopulation", color = "black", face = "bold", size = 10))
 ggar_obj_annotated
+```
+
+
+
+
+```{r Expression of genes used to exclude haemopoietic, epithelial and endothelial cells}
+
 ```
 
 ```{r}
@@ -790,7 +826,7 @@ dotplot(egmt, title = "GSEA HALLMARKS", x="NES")
 
 ```{R, message=F, warning=F, fig.width=10, fig.height=5}
 library(enrichplot)
-for(i in 1:nrow(egmt_df)){
+for(i in 1:5){
   p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
   plot(p)
 }
@@ -828,7 +864,7 @@ dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=30, font.
 ### Enrichment Plots
 
 ```{R, message=F, warning=F, fig.width=10, fig.height=5}
-for(i in 1:nrow(egmt_df)){
+for(i in 1:5){
   p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
   plot(p)
 }
@@ -947,10 +983,34 @@ pheatmap(mat=sampleDistMatrix,
          clustering_distance_rows=sampleDists,
          clustering_distance_cols=sampleDists,
          col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
-
 ```
 
+## Clinical Correlations
 
+```{R, message=F, warning=F, fig.width=10}
+metadata_pca <- metadata[,1:3]
+vsd_matrix <- as.matrix(assay(vsd))
+p <- pca(vsd_matrix, metadata = metadata_pca)
+
+  eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PC1-10 clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
 
 ```{r}
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
@@ -1100,6 +1160,7 @@ mm <- model.matrix(~Tumor_JuxtaTumor, colData(vsd))
 ```
 
 
+# Predicting subpopulation(s) present in In-House samples
 
 ## Assigning in-house samples to a CAF subtype using K-nearest neighbours
 
@@ -1164,21 +1225,33 @@ plot(outputs)
 
 ```{r}
   prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
+names(prediction) <- rownames(mat_unknown)
 prediction
 ```
 They are all predicted to be S1 using this initial application of the algorithm except one sample.
 Possibly use interquartile range to improve performance?
 
-### Deconvolution using CIBERSORTx
+## Deconvolution using CIBERSORTx
 
-Plan: Batch correct S1, S3 and S4 if possible, do not preserve differences between CAF and TAN.
-Create signature matrix for CIBERSORTx
-Possibly: TPM normalise, probably optional
-Run CIBERSORTx to figure out proportions of S1, S3 and S4 in In-house samples
+CIBERSORTx [@Newman2019] is the most commonly used tool for cell-type deconvolution. It is a machine learning method which carries out batch correction, correcting for between-platform differences in expression data. In this case, the signature matrix was made using all of the available CAF subpopulation data (40 S1 samples, 25 S3 samples, 24 S4 samples). It is possible to infer the proportions of the different subpopulations as well as a subpopulation-specific gene expression matrix for each sample. Either scRNA-seq, bulk RNA-seq or microarray data can be used as the reference.
 
-```{r Batch correction of samples with known subtype}
+- Create signature matrix for CIBERSORTx
+- TPM normalise data,probably optional
+- Run CIBERSORTx to figure out proportions of S1, S3 and S4 in In-house samples
 
+The files for CIBERSORT (mixture file, reference data and phenotype classes file), were prepared using the `cibersortx_prepare_files.R` script.
+
+`CIBERSORTx` was run using the following command:
 ```
+docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
+```
+
+```{r CIBERSORT initial results}
+cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
+cibersort_results
+```
+
+Results look strange with P-value of 9999. CIBERSORTx was run using the Docker image and using the GUI, and different results were obtained. When the Docker image was used and the number of permutations was changed from 0 to 100, the p-value changed to 0.000. The proportions look different between the two methods, with the GUI predicting about 0.75 S1 with the rest being S4 for most samples.
 
 
 ## References

@@ -1,7 +1,7 @@
 CAF subtype analysis
 ================
 Kevin Ryan
-2022-07-18 18:23:18
+2022-07-22 16:02:54
 
 -   <a href="#introduction" id="toc-introduction">Introduction</a>
     -   <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -24,13 +24,18 @@ Kevin Ryan
             outlier detection</a>
         -   <a href="#batch-correction" id="toc-batch-correction">Batch
             correction</a>
+    -   <a href="#clinical-correlations" id="toc-clinical-correlations">Clinical
+        Correlations</a>
+-   <a href="#predicting-subpopulations-present-in-in-house-samples"
+    id="toc-predicting-subpopulations-present-in-in-house-samples">Predicting
+    subpopulation(s) present in In-House samples</a>
     -   <a
         href="#assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours"
         id="toc-assigning-in-house-samples-to-a-caf-subtype-using-k-nearest-neighbours">Assigning
         in-house samples to a CAF subtype using K-nearest neighbours</a>
-        -   <a href="#deconvolution-using-cibersortx"
-            id="toc-deconvolution-using-cibersortx">Deconvolution using
-            CIBERSORTx</a>
+    -   <a href="#deconvolution-using-cibersortx"
+        id="toc-deconvolution-using-cibersortx">Deconvolution using
+        CIBERSORTx</a>
     -   <a href="#references" id="toc-references">References</a>
 
 # Introduction
@@ -247,6 +252,7 @@ metadata[1:5,]
     ## B86T13 /home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon
 
 ``` r
+write.table(metadata, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/metadata_caf_subtypes.txt", quote = F, sep = "\t", row.names = T)
 metadata_no_inhouse <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta)
 metadata_no_inhouse$Tumor_JuxtaTumor <- gsub(x = metadata_no_inhouse$Tumor_JuxtaTumor, pattern = "-", replacement = "")
@@ -347,132 +353,6 @@ ntd <- normTransform(dds)
 ```
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
-
-``` r
-library(SummarizedExperiment)
-library(tibble)
-names = basename(dirname(coldata$files))
-txi = tximport(coldata$files, type = "salmon", txOut = TRUE)
-```
-
-    ## reading in files with read_tsv
-
-    ## 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113
-
-``` r
-se <- SummarizedExperiment(assays = list(txi[["counts"]], abundance = txi[["abundance"]], length = txi[["length"]]), colData = coldata)
-gi.s = summarizeToGene(txi, tx2gene = tx2gene,countsFromAbundance="scaledTPM")
-```
-
-    ## summarizing abundance
-    ## summarizing counts
-    ## summarizing length
-
-``` r
-gse.s = SummarizedExperiment(assays = list(counts = gi.s[["counts"]], abundance = gi.s[["abundance"]], length = gi.s[["length"]]),
-                                colData = coldata)
-abundance_tpm_data <- as.data.frame(assays(gse.s)[["abundance"]])
-colnames(abundance_tpm_data) <- coldata$names
-abundance_tpm_data_no_inhouse <- abundance_tpm_data[,colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse)]
-abundance_tpm_data_inhouse <- abundance_tpm_data[,!(colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse))]
-abundance_tpm_data_no_inhouse <- tibble::rownames_to_column(abundance_tpm_data_no_inhouse, "genes")
-abundance_tpm_data_inhouse <- tibble::rownames_to_column(abundance_tpm_data_inhouse, "genes")
-subtypes_labelled <- metadata_no_inhouse$Subtype
-colnames(abundance_tpm_data_no_inhouse)[-1] <- subtypes_labelled
-abundance_tpm_data_no_inhouse <- tibble(abundance_tpm_data_no_inhouse, .name_repair = "minimal")
-s1_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S1")
-s3_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S3")
-s4_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S4")
-abundance_tpm_data_no_inhouse_order <- tibble(genes = abundance_tpm_data_no_inhouse$genes, 
-                                              abundance_tpm_data_no_inhouse[,s1_cols], 
-                                              abundance_tpm_data_no_inhouse[,s3_cols],
-                                              abundance_tpm_data_no_inhouse[,s4_cols],
-                                              .name_repair = "minimal"
-                                              )
-abundance_tpm_data_no_inhouse_order[1:5,1:5]
-```
-
-    ## # A tibble: 5 × 5
-    ##   genes                 S1    S1      S1    S1
-    ##   <chr>              <dbl> <dbl>   <dbl> <dbl>
-    ## 1 ENSG00000000003.14 20.2  44.7  14.8     18.6
-    ## 2 ENSG00000000005.6   0     0     9.03     0  
-    ## 3 ENSG00000000419.12 63.6  49.0  90.2     72.7
-    ## 4 ENSG00000000457.14  2.98  3.25  3.04     0  
-    ## 5 ENSG00000000460.17  5.56  4.56  0.0417   0
-
-``` r
-#write.table(abundance_tpm_data_no_inhouse_order, 
- #           file = "/home/kevin/Documents/PhD/cibersort/caf_subtypes_tpm_for_sig_matrix.txt", 
-  #          sep = "\t", quote = F,
-   #         row.names = F)
-#write.table(abundance_tpm_data_inhouse, 
- #           file = "/home/kevin/Documents/PhD/cibersort/caf_tpm_mixture.txt", 
-  #          sep = "\t", quote = F,
-   #         row.names = F)
-```
-
-``` r
-s1_cols_length <- length(s1_cols)
-s3_cols_length <- length(s3_cols)
-s4_cols_length <- length(s4_cols)
-S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
-S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
-S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
-if (length(S1) != length(colnames(abundance_tpm_data_no_inhouse_order))-1){
-  stop("length s1 row incorrect")
-} else if (length(S3) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
-  stop("length s3 row incorrect")
-} else if (length(S4) != length(colnames(abundance_tpm_data_no_inhouse_order))-1) {
-  stop("length s4 row incorrect")
-}
-out <- rbind.data.frame(S1, S3, S4)
-colnames(out) <- NULL
-row.names(out) <- c("S1", "S3", "S4")
-#write.table(out, file = "/home/kevin/Documents/PhD/cibersort/phenoclasses_caf.txt", sep = "\t", quote = F, col.names = F)
-```
-
-CIBERSORTx was run using the following command:
-
-    docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
-
-``` r
-cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
-cibersort_results
-```
-
-    ##    Mixture        S1 S3          S4 P.value Correlation      RMSE
-    ## 1     4033 0.9570748  0 0.042925205       0   0.7870899 0.6807551
-    ## 2     4034 1.0000000  0 0.000000000       0   0.8141137 0.6547153
-    ## 3     4027 0.8987753  0 0.101224730       0   0.7687020 0.6886350
-    ## 4     4028 1.0000000  0 0.000000000       0   0.7829962 0.7051913
-    ## 5     4112 0.9903751  0 0.009624853       0   0.8377707 0.6094339
-    ## 6     4113 1.0000000  0 0.000000000       0   0.8770761 0.5382961
-    ## 7     4116 0.9926897  0 0.007310301       0   0.8019636 0.6716308
-    ## 8     4117 1.0000000  0 0.000000000       0   0.8311613 0.6253372
-    ## 9     4214 0.9889958  0 0.011004172       0   0.8361520 0.6117524
-    ## 10    4215 1.0000000  0 0.000000000       0   0.8465000 0.5976711
-    ## 11    4315 0.9728492  0 0.027150776       0   0.8048235 0.6586261
-    ## 12    4316 1.0000000  0 0.000000000       0   0.8602991 0.5716391
-    ## 13    4340 0.9787148  0 0.021285151       0   0.8009182 0.6673828
-    ## 14    4341 0.9954915  0 0.004508522       0   0.8119521 0.6563516
-    ## 15    4344 0.9902103  0 0.009789743       0   0.7950935 0.6816636
-    ## 16    4345 0.9916468  0 0.008353235       0   0.7649171 0.7291115
-    ## 17    3532 0.9833313  0 0.016668715       0   0.7842058 0.6959260
-    ## 18    3533 1.0000000  0 0.000000000       0   0.8140856 0.6547627
-    ## 19    3536 0.9775435  0 0.022456479       0   0.7423141 0.7559936
-    ## 20    3537 1.0000000  0 0.000000000       0   0.7578456 0.7434883
-    ## 21    4299 0.9721026  0 0.027897353       0   0.8134793 0.6440161
-    ## 22    4300 1.0000000  0 0.000000000       0   0.8306485 0.6262410
-    ## 23    4722 0.7708237  0 0.229176322       0   0.8034468 0.6101486
-    ## 24    4723 0.9723284  0 0.027671590       0   0.7822037 0.6944232
-
-Results look strange with P-value of 9999. CIBERSORTx was run using the
-Docker image and using the GUI, and different results were obtained.
-When the Docker image was used and the number of permutations was
-changed from 0 to 100, the p-value changed to 0.000. The proportions
-look different between the two methods, with the GUI predicting about
-0.75 S1 with the rest being S4 for most samples.
 
 ``` r
 suppressPackageStartupMessages(library(sva))
@@ -600,7 +480,7 @@ dds <- DESeq(dds)
     ## fitting model and testing
 
 ``` r
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="useast.ensembl.org")
 ```
 
     ## Warning: Ensembl will soon enforce the use of https.
@@ -609,9 +489,8 @@ mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="us
 ``` r
 ensembl_ids <- rownames(assay(dds))
 ensembl_ids <- str_split_fixed(ensembl_ids, pattern = "\\.", n = 2)[,1]
-info <- getBM(attributes=c("hgnc_symbol",
-                           "ensembl_gene_id"),
-                  filters = c("ensembl_gene_id"),
+info <- getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
+                  filters = "ensembl_gene_id",
                   values = ensembl_ids,
                   mart = mart,
                   useCache=FALSE)
@@ -637,36 +516,166 @@ There are other possible genes which could be used to distinguish them
 through manual curation: FSP1, CAV1, DPP4
 
 ``` r
-genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
-info_unique <- info[!duplicated(info$hgnc_symbol),]
-rownames(info_unique) <- info_unique$hgnc_symbol
-genes_interest_info <- info_unique[genes_interest,] 
-ensembl_genes_dds <- str_split_fixed(rownames(assay(dds)), pattern = "\\.", n = 2)[,1]
-dds_replicated <- dds
-ids <- which(ensembl_genes_dds %in% genes_interest_info$ensembl_gene_id)
-dds_genes_interest <- dds[ids,]
-dds_genes_interest_exprs <- data.frame(assay(dds_genes_interest))
-colnames(dds_genes_interest_exprs) <- rownames(metadata)
-rownames(dds_genes_interest_exprs) <- genes_interest
-```
+# Function to take in dds object, ensembl - hgnc info and genes interest and output df for plotting
+create_annotated_df_for_plotting <- function(dds, info, genes_interest){
+  library(stringr)
+  # put check for type of gene symbol in dds object, assuming ensembl gene version atm
+  # assume info have column called hgnc_symbol
+  info <- info[!duplicated(info$hgnc_symbol),]
+  rownames(info) <- info$hgnc_symbol
+  # assuming genes interest are in info, put in check for this to deal with missing gene symbol
+  genes_interest_info <- info[genes_interest,] 
+  # again, here assuming ENSG1234.1 etc
+  ensembl_genes_dds <- str_split_fixed(rownames(assay(dds)), pattern = "\\.", n = 2)[,1]
+  ids <- which(ensembl_genes_dds %in% genes_interest_info$ensembl_gene_id)
+  dds_genes_interest <- dds[ids,]
+  dds_genes_interest_exprs <- data.frame(assay(dds_genes_interest))
+  metadata <- as.data.frame(colData(dds))
+  colnames(dds_genes_interest_exprs) <- rownames(metadata)
+  rownames(dds_genes_interest_exprs) <- genes_interest
+  dds_genes_interest_exprs_t <- as.data.frame(t(dds_genes_interest_exprs))
+  dds_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
+  dds_genes_interest_exprs_t$Study <- metadata$Study
+  dds_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
+  return(dds_genes_interest_exprs_t)
+}
 
-``` r
-dds_genes_interest_exprs_t <- as.data.frame(t(dds_genes_interest_exprs))
-dds_genes_interest_exprs_t$Subpopulation <- metadata$Subtype
-dds_genes_interest_exprs_t$Study <- metadata$Study
-dds_genes_interest_exprs_t$Tumor_JuxtaTumor <- metadata$Tumor_JuxtaTumor
-```
-
-``` r
-fap_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP, color = Tumor_JuxtaTumor, shape = Study)) +
-  geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+caf_plot_tumour_juxtatumour <- function(annotated_df_for_plotting, gene_of_interest, label_yaxis = gene_of_interest){
+  if (is.null(label_yaxis)){
+    label_yaxis <- gene_of_interest
+  }
+  annotated_df_for_plotting$gene_of_interest <- annotated_df_for_plotting[, gene_of_interest]
+  ggplot(annotated_df_for_plotting, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
     position = position_jitter(
       width = 0.15,  # amount of jitter in horizontal direction
       height = 0     # amount of jitter in vertical direction (0 = none)
     )
   ) +
+  scale_y_continuous(gene_of_interest) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"))
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())  +
+    ylab(label_yaxis)  #, axis.title.x = element_blank())
+}
+
+caf_plot_study <- function(annotated_df_for_plotting, gene_of_interest, label_yaxis = gene_of_interest){
+  if (is.null(label_yaxis)){
+    label_yaxis <- gene_of_interest
+  }
+  annotated_df_for_plotting$gene_of_interest <- annotated_df_for_plotting[, gene_of_interest]
+  ggplot(annotated_df_for_plotting, aes(Subpopulation, gene_of_interest, colour = Study)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank()) +
+    ylab(label_yaxis)#
+}
+```
+
+``` r
+library(ggpubr)
+```
+
+    ## 
+    ## Attaching package: 'ggpubr'
+
+    ## The following object is masked from 'package:cowplot':
+    ## 
+    ##     get_legend
+
+``` r
+vsd <- vst(dds, blind = FALSE)
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+dds_genes_interest_exprs_t <- create_annotated_df_for_plotting(vsd, info = info, genes_interest = genes_interest)
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+caf_plot_study(df_for_plotting, gene_of_interest = "FAP")
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Prepare%20vsd%20object%20for%20plotting%20genes%20of%20interest-1.png)<!-- -->
+
+``` r
+caf_plot_tumour_juxtatumour(df_for_plotting, gene_of_interest = "FAP")
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Prepare%20vsd%20object%20for%20plotting%20genes%20of%20interest-2.png)<!-- -->
+
+``` r
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Prepare%20vsd%20object%20for%20plotting%20genes%20of%20interest-3.png)<!-- -->
+
+``` r
+ggar_obj_subpop_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Prepare%20vsd%20object%20for%20plotting%20genes%20of%20interest-4.png)<!-- -->
+
+``` r
+genes_interest <- c("CXCL12","TNFSF4","PDCD1LG2", "CD276", "NT5E", "DPP4", "CAV1", "ATL1")
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20some%20other%20genes%20of%20interest-1.png)<!-- -->
+
+``` r
+ggar_obj_subpop_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20some%20other%20genes%20of%20interest-2.png)<!-- -->
+
+``` r
+# plotting original counts here, transformation 
+genes_interest <- c("PTPRC", "EPCAM", "PECAM1")
+genes_interest_common_name <- c("CD45", "EPCAM", "CD31")
+df_for_plotting <- create_annotated_df_for_plotting(dds = dds, info = info, genes_interest = genes_interest)
+plots_out_study <- lapply(FUN = caf_plot_study, X = genes_interest, annotated_df_for_plotting = df_for_plotting, label_yaxis = genes_interest_common_name)
+plots_out_subpop <- lapply(FUN = caf_plot_tumour_juxtatumour, X = genes_interest, annotated_df_for_plotting = df_for_plotting, label_yaxis = genes_interest_common_name)
+ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_subpop <- ggarrange(plotlist = plots_out_subpop, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_study_annotated <- annotate_figure(ggar_obj_study, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_subpop_annotated <- annotate_figure(ggar_obj_subpop, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_study_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20haemopoietic,%20epithelial%20and%20endothelial%20marker%20-%20should%20be%20low-1.png)<!-- -->
+
+``` r
+ggar_obj_subpop_annotated
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20haemopoietic,%20epithelial%20and%20endothelial%20marker%20-%20should%20be%20low-2.png)<!-- -->
+
+The low to zero counts of these genes are what we would expect.
+
+``` r
+#fap_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = FAP, color = Tumor_JuxtaTumor, shape = Study)) +
+ # geom_point(size = 0.75,  # reduce point size to minimize overplotting 
+  #  position = position_jitter(
+   #   width = 0.15,  # amount of jitter in horizontal direction
+    #  height = 0     # amount of jitter in vertical direction (0 = none)
+  #  )
+#  ) +
+#  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#panel.background = element_blank(), axis.line = element_line(colour = "black"))
 
 itgb1_plot <- ggplot(dds_genes_interest_exprs_t, aes(x = Subpopulation, y = ITGB1, color = Tumor_JuxtaTumor, shape = Study)) +
   geom_point(size = 0.75,  # reduce point size to minimize overplotting 
@@ -712,90 +721,38 @@ legend.title = element_text(size=10), #change legend title font size
 
 )
 
-p <- plot_grid(fap_plot + theme(legend.position = "none"), 
-               itgb1_plot + theme(legend.position = "none") , 
-               acta2_plot + theme(legend.position = "none"), 
-               pdpn_plot + theme(legend.position = "none"), 
-               pdgfrb_plot, #+ theme(legend.position = "none"), 
-               ncol=3, 
-               labels=LETTERS[1:5])
+#p <- plot_grid(fap_plot + theme(legend.position = "none"), 
+ #              itgb1_plot + theme(legend.position = "none") , 
+  #             acta2_plot + theme(legend.position = "none"), 
+   #            pdpn_plot + theme(legend.position = "none"), 
+    #           pdgfrb_plot, #+ theme(legend.position = "none"), 
+     #          ncol=3, 
+      #         labels=LETTERS[1:5])
 #legend <- get_legend(
   # create some space to the left of the legend
  # fap_plot + theme(legend.box.margin = margin(0, 0, 0,12))
 #)
 # look again at what this is
-title <- ggdraw() + draw_label("Unnormalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
+#title <- ggdraw() + draw_label("Unnormalised expression of marker genes\naccording to CAF subpopulation", fontface='bold')
 #plot_grid(title, p, legend, ncol=1, rel_heights=c(0.1, 0.5), rel_widths = 1, 1) # rel_heights values control title margins
-plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
+#plot_grid(title, p, ncol=1, rel_heights=c(0.1, 0.5)) # rel_heights values control title margins
 ```
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
 library(ggpubr)
-```
+# input table - row sample, col genes
 
-    ## 
-    ## Attaching package: 'ggpubr'
-
-    ## The following object is masked from 'package:cowplot':
-    ## 
-    ##     get_legend
-
-``` r
-caf_plot_function_tumour_juxtatumour <- function(input_table, gene_of_interest){
-  input_table$gene_of_interest <- input_table[, gene_of_interest]
-  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
-  geom_point(size = 1,  # reduce point size to minimize overplotting 
-    position = position_jitter(
-      width = 0.15,  # amount of jitter in horizontal direction
-      height = 0     # amount of jitter in vertical direction (0 = none)
-    )
-  ) +
-  scale_y_continuous(gene_of_interest) +
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
-}
 #caf_plot_function(dds_genes_interest_exprs_t, gene_of_interest = "FAP")
-plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = dds_genes_interest_exprs_t)
-plots_out
+#plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = dds_genes_interest_exprs_t)
+#plots_out
+#ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
+#ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
+#ggar_obj_annotated
 ```
 
-    ## [[1]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
-
-    ## 
-    ## [[2]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-2.png)<!-- -->
-
-    ## 
-    ## [[3]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-3.png)<!-- -->
-
-    ## 
-    ## [[4]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-4.png)<!-- -->
-
-    ## 
-    ## [[5]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-5.png)<!-- -->
-
 ``` r
-ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
-ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
-ggar_obj_annotated
-```
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-6.png)<!-- -->
-
-``` r
-library(ggpubr)
 caf_plot_function_study <- function(input_table, gene_of_interest){
+  library(ggplot2)
   input_table$gene_of_interest <- input_table[, gene_of_interest]
   ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Study)) +
   geom_point(size = 1,  # reduce point size to minimize overplotting 
@@ -808,45 +765,36 @@ caf_plot_function_study <- function(input_table, gene_of_interest){
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
 panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
 }
-plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = dds_genes_interest_exprs_t)
-plots_out
+
+caf_plot_function_tumour_juxtatumour <- function(input_table, gene_of_interest){
+  library(ggplot2)
+  input_table$gene_of_interest <- input_table[, gene_of_interest]
+  ggplot(input_table, aes(Subpopulation, gene_of_interest, colour = Tumor_JuxtaTumor)) +
+  geom_point(size = 1,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.15,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  scale_y_continuous(gene_of_interest) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.title.x = element_blank())
+}
 ```
 
-    ## [[1]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
-
-    ## 
-    ## [[2]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-2.png)<!-- -->
-
-    ## 
-    ## [[3]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-3.png)<!-- -->
-
-    ## 
-    ## [[4]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-4.png)<!-- -->
-
-    ## 
-    ## [[5]]
-
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-5.png)<!-- -->
-
 ``` r
+library(ggpubr)
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+plots_out <- lapply(FUN = caf_plot_function_study, X = genes_interest, input_table = dds_genes_interest_exprs_t)
 ggar_obj <- ggarrange(plotlist = plots_out, common.legend = TRUE) # rel_heights values control title margins
 ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopulation"))
 ggar_obj_annotated
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-6.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
 ``` r
-vsd <- vst(dds, blind = FALSE)
-genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+#vsd <- vst(dds, blind = FALSE)
 info_unique <- info[!duplicated(info$hgnc_symbol),]
 rownames(info_unique) <- info_unique$hgnc_symbol
 genes_interest_info <- info_unique[genes_interest,] 
@@ -925,7 +873,7 @@ ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopul
 ggar_obj_annotated
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
 
 ``` r
 plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = vsd_genes_interest_exprs_t)
@@ -935,7 +883,7 @@ ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopul
 ggar_obj_annotated
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-13-2.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-12-2.png)<!-- -->
 
 ``` r
 library(purrr)
@@ -1019,7 +967,7 @@ ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopul
 ggar_obj_annotated
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-19-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ``` r
 plots_out <- lapply(FUN = caf_plot_function_tumour_juxtatumour, X = genes_interest, input_table = adjusted_genes_interest_exprs_t)
@@ -1029,7 +977,7 @@ ggar_obj_annotated <- annotate_figure(ggar_obj, bottom = text_grob("CAF Subpopul
 ggar_obj_annotated
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-19-2.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-18-2.png)<!-- -->
 
 -   Carry out batch correction between studies, cannot account for
     differences in subpopulations here
@@ -1283,19 +1231,19 @@ egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue,
 dotplot(egmt, title = "GSEA HALLMARKS", x="NES")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
 
 ### Enrichment plots
 
 ``` r
 library(enrichplot)
-for(i in 1:nrow(egmt_df)){
+for(i in 1:5){
   p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
   plot(p)
 }
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-5.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-26-6.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-25-5.png)<!-- -->
 
 #### GO Biological Processes GSEA
 
@@ -1354,18 +1302,18 @@ egmt_subs[1:5,]
 dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=30, font.size = 8)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
 
 ### Enrichment Plots
 
 ``` r
-for(i in 1:nrow(egmt_df)){
+for(i in 1:5){
   p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
   plot(p)
 }
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-5.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-6.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-7.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-8.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-9.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-10.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-11.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-12.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-13.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-14.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-15.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-16.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-17.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-18.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-19.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-20.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-21.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-22.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-23.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-24.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-25.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-26.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-27.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-28.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-29.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-30.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-31.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-32.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-33.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-34.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-35.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-36.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-37.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-38.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-39.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-40.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-41.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-42.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-43.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-44.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-45.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-46.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-47.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-48.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-49.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-50.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-51.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-52.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-53.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-54.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-55.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-56.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-57.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-58.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-59.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-60.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-61.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-62.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-63.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-64.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-65.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-66.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-67.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-68.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-69.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-70.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-71.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-72.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-73.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-74.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-75.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-76.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-77.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-78.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-79.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-80.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-81.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-82.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-83.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-84.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-85.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-86.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-87.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-88.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-89.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-90.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-91.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-92.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-93.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-94.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-95.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-96.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-97.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-98.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-99.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-100.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-28-5.png)<!-- -->
 \### Data transformation
 
 There are a number of options to choose from when normalising RNA-seq
@@ -1412,7 +1360,7 @@ ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
   coord_fixed() + facet_grid( . ~ transformation)  
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-30-1.png)<!-- -->
 
 There doesn’t seem to much of a difference between the two methods of
 normalisation, only that the lowly expressed genes have been brought up
@@ -1465,7 +1413,7 @@ deseq_pca_studies <- function(dds_object){
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-34-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-33-1.png)<!-- -->
 
 ### Batch correction
 
@@ -1500,6 +1448,35 @@ pheatmap(mat=sampleDistMatrix,
 ```
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/Generate%20distance%20matrix%20+%20generate%20heatmap-1.png)<!-- -->
+
+## Clinical Correlations
+
+``` r
+metadata_pca <- metadata[,1:3]
+vsd_matrix <- as.matrix(assay(vsd))
+p <- pca(vsd_matrix, metadata = metadata_pca)
+
+  eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PC1-10 clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-35-1.png)<!-- -->
 
 ``` r
 plotPCA(vsd, intgroup = c("Study", "Subtype"))
@@ -1683,6 +1660,8 @@ batch <- coldata$Study
 mm <- model.matrix(~Tumor_JuxtaTumor, colData(vsd))
 ```
 
+# Predicting subpopulation(s) present in In-House samples
+
 ## Assigning in-house samples to a CAF subtype using K-nearest neighbours
 
 1.  Split mat into our known (training) and unknown (testing)
@@ -1758,22 +1737,82 @@ plot(outputs)
 
 ``` r
   prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
+names(prediction) <- rownames(mat_unknown)
 prediction
 ```
 
-    ##  [1] S1 S1 S4 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S1 S4 S1
+    ## 4033 4034 4027 4028 4112 4113 4116 4117 4214 4215 4315 4316 4340 4341 4344 4345 
+    ##   S1   S1   S4   S1   S1   S1   S1   S1   S1   S1   S1   S1   S1   S1   S1   S1 
+    ## 3532 3533 3536 3537 4299 4300 4722 4723 
+    ##   S1   S1   S1   S1   S1   S1   S4   S1 
     ## Levels: S1 S3 S4
 
 They are all predicted to be S1 using this initial application of the
 algorithm except one sample. Possibly use interquartile range to improve
 performance?
 
-### Deconvolution using CIBERSORTx
+## Deconvolution using CIBERSORTx
 
-Plan: Batch correct S1, S3 and S4 if possible, do not preserve
-differences between CAF and TAN. Create signature matrix for CIBERSORTx
-Possibly: TPM normalise, probably optional Run CIBERSORTx to figure out
-proportions of S1, S3 and S4 in In-house samples
+CIBERSORTx \[Newman2019\] is the most commonly used tool for cell-type
+deconvolution. It is a machine learning method which carries out batch
+correction, correcting for between-platform differences in expression
+data. In this case, the signature matrix was made using all of the
+available CAF subpopulation data (40 S1 samples, 25 S3 samples, 24 S4
+samples). It is possible to infer the proportions of the different
+subpopulations as well as a subpopulation-specific gene expression
+matrix for each sample. Either scRNA-seq, bulk RNA-seq or microarray
+data can be used as the reference.
+
+-   Create signature matrix for CIBERSORTx
+-   TPM normalise data,probably optional
+-   Run CIBERSORTx to figure out proportions of S1, S3 and S4 in
+    In-house samples
+
+The files for CIBERSORT (mixture file, reference data and phenotype
+classes file), were prepared using the `cibersortx_prepare_files.R`
+script.
+
+`CIBERSORTx` was run using the following command:
+
+    docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
+
+``` r
+cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
+cibersort_results
+```
+
+    ##    Mixture        S1 S3          S4 P.value Correlation      RMSE
+    ## 1     4033 0.9570748  0 0.042925205       0   0.7870899 0.6807551
+    ## 2     4034 1.0000000  0 0.000000000       0   0.8141137 0.6547153
+    ## 3     4027 0.8987753  0 0.101224730       0   0.7687020 0.6886350
+    ## 4     4028 1.0000000  0 0.000000000       0   0.7829962 0.7051913
+    ## 5     4112 0.9903751  0 0.009624853       0   0.8377707 0.6094339
+    ## 6     4113 1.0000000  0 0.000000000       0   0.8770761 0.5382961
+    ## 7     4116 0.9926897  0 0.007310301       0   0.8019636 0.6716308
+    ## 8     4117 1.0000000  0 0.000000000       0   0.8311613 0.6253372
+    ## 9     4214 0.9889958  0 0.011004172       0   0.8361520 0.6117524
+    ## 10    4215 1.0000000  0 0.000000000       0   0.8465000 0.5976711
+    ## 11    4315 0.9728492  0 0.027150776       0   0.8048235 0.6586261
+    ## 12    4316 1.0000000  0 0.000000000       0   0.8602991 0.5716391
+    ## 13    4340 0.9787148  0 0.021285151       0   0.8009182 0.6673828
+    ## 14    4341 0.9954915  0 0.004508522       0   0.8119521 0.6563516
+    ## 15    4344 0.9902103  0 0.009789743       0   0.7950935 0.6816636
+    ## 16    4345 0.9916468  0 0.008353235       0   0.7649171 0.7291115
+    ## 17    3532 0.9833313  0 0.016668715       0   0.7842058 0.6959260
+    ## 18    3533 1.0000000  0 0.000000000       0   0.8140856 0.6547627
+    ## 19    3536 0.9775435  0 0.022456479       0   0.7423141 0.7559936
+    ## 20    3537 1.0000000  0 0.000000000       0   0.7578456 0.7434883
+    ## 21    4299 0.9721026  0 0.027897353       0   0.8134793 0.6440161
+    ## 22    4300 1.0000000  0 0.000000000       0   0.8306485 0.6262410
+    ## 23    4722 0.7708237  0 0.229176322       0   0.8034468 0.6101486
+    ## 24    4723 0.9723284  0 0.027671590       0   0.7822037 0.6944232
+
+Results look strange with P-value of 9999. CIBERSORTx was run using the
+Docker image and using the GUI, and different results were obtained.
+When the Docker image was used and the number of permutations was
+changed from 0 to 100, the p-value changed to 0.000. The proportions
+look different between the two methods, with the GUI predicting about
+0.75 S1 with the rest being S4 for most samples.
 
 ## References
 
