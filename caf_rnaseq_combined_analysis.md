@@ -1,7 +1,7 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-08-25 14:35:54
+2022-08-29 16:39:11
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#analysis" id="toc-analysis">Analysis</a>
@@ -25,9 +25,8 @@ Kevin Ryan
     - <a href="#differential-expression-analysis-caf-vs-tan"
       id="toc-differential-expression-analysis-caf-vs-tan">Differential
       Expression Analysis CAF vs TAN</a>
-    - <a href="#surrogate-variable-analysis---maybe-get-rid"
-      id="toc-surrogate-variable-analysis---maybe-get-rid">Surrogate variable
-      analysis - MAYBE GET RID</a>
+    - <a href="#surrogate-variable-analysis"
+      id="toc-surrogate-variable-analysis">Surrogate variable analysis</a>
     - <a
       href="#differential-expression-analysis-without-the-inhouse-data-and-without-study-6144"
       id="toc-differential-expression-analysis-without-the-inhouse-data-and-without-study-6144">Differential
@@ -38,6 +37,9 @@ Kevin Ryan
       href="#gene-set-variation-analysis-gsva-for-gene-signature-identification"
       id="toc-gene-set-variation-analysis-gsva-for-gene-signature-identification">Gene
       set variation analysis (GSVA) for gene signature identification</a>
+    - <a href="#chemoresistance-gene-signature"
+      id="toc-chemoresistance-gene-signature">Chemoresistance gene
+      signature</a>
     - <a href="#marker-gene-expression" id="toc-marker-gene-expression">Marker
       gene expression</a>
     - <a href="#batch-correction-with-combat-seq-1"
@@ -163,7 +165,8 @@ from the same patient. However, I have not been able to figure out
 whether they came from the same patient. We could possibly use Optitype
 to determine HLA allele - match tumour and juxta tumour.
 
-We also have scRNA-seq data for S1.
+We also have scRNA-seq data for S1, labelled with 8 subpopulations of S1
+CAFs. It may be possible to
 
 It is likely that sorting the cells using FACS alters the
 transcriptional properties of the cells compared to if they are
@@ -181,17 +184,22 @@ cancers. Unfortunately, data is not available for the S2 subpopulation
 and 11 of the 12 cancers encountered in our samples are Luminal A.
 
 Combining RNA-sequencing datasets from different studies can be very
-challenging. We can expect batch effects to be present, so it might be
-possible to determine whether differences be observe are due to actual
-biological effects or technical artifacts. In addition, a recent study
-suggests that DESeq2 and edgeR (the most popular differential expression
-tools) experience large rates of false positives when used with large
-sample sizes (Li et al. 2022). One of the datasets (`EGAD00001006144`)
-was produced using stranded RNA-seq, whereas the other datasets were
-unstranded. This can lead to a lack of comparability of the datasets
-(Zhao, Ye, and Stanton 2020). It may be necessary to drop this dataset
-from the analysis. All samples were prepared by poly(A) selection (use
-of oligo-dT).
+challenging. We can expect batch effects to be present, so it might not
+be possible to determine whether differences we observe are due to
+actual biological effects or technical artifacts. In addition, a recent
+study suggests that DESeq2 and edgeR (the most popular differential
+expression tools) experience large rates of false positives when used
+with large sample sizes (Li et al. 2022). However, this assertion has
+been refuted, and it has been suggested that the Li 2022 study did not
+apply appropriate batch correction and quality control ([Twitter
+thread](https://threadreaderapp.com/thread/1513468597288452097.html)
+from Mike Love and associated [code on
+GitHub](https://github.com/mikelove/preNivolumabOnNivolumab/blob/main/preNivolumabOnNivolumab.knit.md)).
+One of the datasets (`EGAD00001006144`) was produced using stranded
+RNA-seq, whereas the other datasets were unstranded. This can lead to a
+lack of comparability of the datasets (Zhao, Ye, and Stanton 2020). It
+may be necessary to drop this dataset from the analysis. All samples
+were prepared by poly(A) selection (use of oligo-dT).
 
 # Analysis
 
@@ -211,10 +219,10 @@ consider them.
 ## Read in data
 
 Samples were processed with nf-core/rnaseq version `3.8.1` Salmon was
-used in alignment mode so there is no salmon index, therefore there is
-no checksum to import the metadata. Therefore, the parameters
-recommended in the [tximeta
-vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known)\]
+used in alignment mode so there is no salmon index, so there is no
+checksum to import the metadata. Therefore, the parameters recommended
+in the [tximeta
+vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known)
 were used to summarise transcript counts to the gene level, using a
 tx2gene file constructed using `generate_tx2gene_table.R`.
 
@@ -225,27 +233,58 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
                       Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
                       stringsAsFactors=FALSE)
 # tx2gene file for the gencode v31 file used in the analysis, generated using generate_tx2gene_table.R
-tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
+#tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
+
+# tx2gene but using the hgnc symbol instead of ensembl gene id version
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
 ```
 
-    ## Rows: 226882 Columns: 2
-    ## ── Column specification ────────────────────────────────────────────────────────
-    ## Delimiter: "\t"
-    ## chr (2): TXNAME, GENEID
-    ## 
-    ## ℹ Use `spec()` to retrieve the full column specification for this data.
-    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+    ## Ensembl site unresponsive, trying useast mirror
+
+    ## Ensembl site unresponsive, trying uswest mirror
 
 ``` r
+                #host="uswest.ensembl.org")
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+
 # salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
+# txOut = FALSE means to summarise to gene level (i.e. don't give out transcripts, give out gene level)
 se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
 ```
 
     ## reading in files with read_tsv
+
     ## 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 
+    ## removing duplicated transcript rows from tx2gene
+    ## transcripts missing from tx2gene: 18466
     ## summarizing abundance
     ## summarizing counts
     ## summarizing length
+
+``` r
+#se_hgnc <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene_hgnc)
+# read in using tx
+```
+
+``` r
+dds <- DESeqDataSet(se, design = ~1)
+```
+
+    ## using counts and average transcript lengths from tximeta
+
+``` r
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds <- dds[keep,]
+# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
+X <- 7
+keep <- rowSums(counts(dds) >= 10) >= X
+dds <- dds[keep,]
+vsd <- vst(dds, blind = FALSE)
+```
+
+    ## using 'avgTxLength' from assays(dds), correcting for library size
 
 ``` r
 files_no_inhouse <- file.path(metadata_no_inhouse$directory, rownames(metadata_no_inhouse), "quant.sf")
@@ -262,6 +301,8 @@ se_no_inhouse <- tximeta(coldata = coldata_no_inhouse, skipMeta=TRUE, txOut=FALS
     ## reading in files with read_tsv
 
     ## 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 
+    ## removing duplicated transcript rows from tx2gene
+    ## transcripts missing from tx2gene: 18466
     ## summarizing abundance
     ## summarizing counts
     ## summarizing length
@@ -336,9 +377,9 @@ dds_noinhouse_no6144 <- dds_noinhouse_no6144[keep,]
 ### Data transformation
 
 There are a number of options to choose from when normalising RNA-seq
-data, the main ones being: - Take the log of the data and add a
-pseudocount. - Variance stabilizing transformation (Anders and Huber
-2010) - Regularized logarithm transformation (Love, Huber, and Anders
+data, the main ones being: \* Take the log of the data and add a
+pseudocount. \* Variance stabilizing transformation (Anders and Huber
+2010) \* Regularized logarithm transformation (Love, Huber, and Anders
 2014)
 
 The log+pseudocount approach tends to mean that lowly expressed genes
@@ -346,7 +387,7 @@ have more of an effect. *Vst* and *rlog* bring these counts towards a
 central amount, making the data more homoskedastic. This allows them to
 be used in downstream processes which require homoskedastic data
 (e.g. PCA). The authors of DESeq2 recommend *vst* for large sample sizes
-such as ours as it is much faster than *rlog*
+such as ours as it is much faster than *rlog*.
 
 ``` r
 meanSdPlot(assay(ntd))
@@ -461,9 +502,11 @@ plotPCA(vsd, intgroup = c("Study", "Subpopulation"))
 PCA plots as per <https://github.com/kevinblighe/PCAtools>
 
 ``` r
-vsd <- assay(vsd)
+vsd_mat <- assay(vsd)
+#keep <- rownames(vsd_mat)[!duplicated(rownames(vsd_mat))]
+#vsd_mat <- vsd_mat[keep,]
 metadata_pca <- metadata[,1:4]
-p <- pca(vsd, metadata = metadata_pca)
+p <- pca(vsd_mat, metadata = metadata_pca)
 pscree <- screeplot(p, components = getComponents(p, 1:30),
     hline = 80, vline = 24, axisLabSize = 14, titleLabSize = 20,
     returnPlot = FALSE) +
@@ -497,7 +540,7 @@ ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
       caption = '24 PCs ≈ 80%',
       returnPlot = FALSE)
  
- ploadings <- plotloadings(p, rangeRetain = 0.01, labSize = 4,
+ ploadings <- plotloadings(p, rangeRetain = 0.01, labSize = 3,
     title = 'Loadings plot', axisLabSize = 12,
     subtitle = 'PC1, PC2, PC3, PC4, PC5',
     caption = 'Top 1% variables',
@@ -736,7 +779,7 @@ correction](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png
 #dds <- DESeqDataSet(countData = round(adjusted_all/10), colData = metadata, design = ~ Study + Tumor_JuxtaTumor)
 ```
 
-### Surrogate variable analysis - MAYBE GET RID
+### Surrogate variable analysis
 
 #### svaseq with study EGAD00001006144
 
@@ -764,7 +807,7 @@ dds_no_inhouse <- DESeq(dds_no_inhouse)
 
     ## fitting model and testing
 
-    ## -- replacing outliers and refitting for 6625 genes
+    ## -- replacing outliers and refitting for 4827 genes
     ## -- DESeq argument 'minReplicatesForReplace' = 7 
     ## -- original counts are preserved in counts(dds)
 
@@ -782,7 +825,7 @@ mod0 <- model.matrix(~   1, colData(dds_no_inhouse))
 svseq <- svaseq(dat, mod, mod0)
 ```
 
-    ## Number of significant surrogate variables is:  20 
+    ## Number of significant surrogate variables is:  21 
     ## Iteration (out of 5 ):1  2  3  4  5
 
 ``` r
@@ -840,7 +883,7 @@ dds_noinhouse_no6144 <- DESeq(dds_noinhouse_no6144)
 
     ## fitting model and testing
 
-    ## -- replacing outliers and refitting for 6434 genes
+    ## -- replacing outliers and refitting for 4760 genes
     ## -- DESeq argument 'minReplicatesForReplace' = 7 
     ## -- original counts are preserved in counts(dds)
 
@@ -907,7 +950,8 @@ annotate_de_genes <- function(df, filter_by){
     df$gene_symbol <- rownames(df)
     colnames(df)[6] <- filter_by_string
     #print(df)
-    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="uswest.ensembl.org")
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",  host="https://www.ensembl.org")
+                    #host="uswest.ensembl.org")
     info <- getBM(attributes=c("hgnc_symbol",
                                "ensembl_gene_id_version",
                                "chromosome_name",
@@ -972,18 +1016,18 @@ filter_dfs_antijoin_rownames <- function(df_list){
 ``` r
 register(MulticoreParam(4))
 ddssva <- dds_no_inhouse
-sv_names <- paste("SV", seq(1,20), sep = "")
+sv_names <- paste("SV", seq(1,svseq$n.sv), sep = "")
 for (i in 1:length(sv_names)){
   colData(ddssva)[,sv_names[i]] <- svseq$sv[,i]
 }
 colData(ddssva)[,"Subpopulation"] <- as.factor(colData(ddssva)$Subpopulation)
 colData(ddssva)[,"Tumor_JuxtaTumor"] <- as.factor(colData(ddssva)$Tumor_JuxtaTumor)
 design(ddssva) <- ~ Subpopulation + Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 + SV19 + SV20
-ddssva_copy_diffdesign <- ddssva
-design(ddssva_copy_diffdesign) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 + SV19 + SV20 + Subpopulation
-# dds_no_inhouse_deseq <- DESeq(ddssva_copy_diffdesign)
-#write_rds(dds_no_inhouse_wald_diffdesign, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/dds_noinhouse_deseq_diffdesign_10082022.Rds")
-dds_no_inhouse_wald_diffdesign <- readRDS("dds_noinhouse_deseq_diffdesign_10082022.Rds")
+ddssva_copy <- ddssva
+design(ddssva_copy) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 + SV19 + SV20 + SV21 + Subpopulation
+#dds_no_inhouse_deseq <- DESeq(ddssva_copy)
+#write_rds(dds_no_inhouse_deseq, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/dds_noinhouse_deseq_hgnc_25082022.Rds")
+dds_no_inhouse_wald_diffdesign <- readRDS("dds_noinhouse_deseq_hgnc_25082022.Rds")
 ```
 
 ``` r
@@ -1078,32 +1122,22 @@ dfs_filtered <- filter_dfs_antijoin_rownames(dfs_to_filter)
 ``` r
 names(dfs_filtered) <- c("S1", "S3", "S4")
 s1_filtered <- dfs_filtered[[1]]
-s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "ensembl_gene_id_version")
+s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "hgnc_symbol")
 ```
 
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
+    ## Ensembl site unresponsive, trying uswest mirror
 
 ``` r
 s3_filtered <- dfs_filtered[[2]]
-s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "ensembl_gene_id_version")
-```
-
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
-
-``` r
+s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "hgnc_symbol")
 s4_filtered <- dfs_filtered[[3]]
-s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "ensembl_gene_id_version")
+s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "hgnc_symbol")
 ```
-
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
 
 #### Without inhouse data or study EGAD00001006144
 
 ``` r
-sv_names <- paste("SV", seq(1,18), sep = "")
+sv_names <- paste("SV", seq(1,svseq_no6144$n.sv), sep = "")
 for (i in 1:length(sv_names)){
   colData(dds_noinhouse_no6144)[,sv_names[i]] <- svseq_no6144$sv[,i]
 }
@@ -1114,8 +1148,11 @@ design(dds_noinhouse_no6144) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5
 #ptm <- proc.time()
 #dds_no_inhouse_no6144 <- DESeq(dds_noinhouse_no6144, parallel = TRUE)
 #proc.time() - ptm
-#dds_no_inhouse_no6144 <- readRDS("dds_noinhouse_no6144_deseq_11082022.Rds")
+#write_rds(dds_no_inhouse_no6144, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/dds_noinhouse_no6144_hgnc_25082022.Rds")
+dds_no_inhouse_no6144 <- readRDS("dds_noinhouse_no6144_hgnc_25082022.Rds")
 ```
+
+Elapsed = 2835.825
 
 ``` r
 #register(MulticoreParam(4))
@@ -1123,7 +1160,7 @@ design(dds_noinhouse_no6144) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5
 #dds_no_inhouse_no6144 <- DESeq(dds_noinhouse_no6144, parallel = TRUE)
 #proc.time() - ptm
 #write_rds(dds_no_inhouse_no6144, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/dds_no_inhouse_no6144_deseq_11082022.Rds")
-dds_no_inhouse_no6144 <- readRDS("dds_no_inhouse_no6144_deseq_11082022.Rds")
+#dds_no_inhouse_no6144 <- readRDS("dds_no_inhouse_no6144_deseq_11082022.Rds")
 ```
 
 The aim here is to extract lists of genes that are upregulated in each
@@ -1211,32 +1248,17 @@ dfs_filtered <- filter_dfs_antijoin_rownames(dfs_to_filter)
 ``` r
 names(dfs_filtered) <- c("S1", "S3", "S4")
 s1_filtered <- dfs_filtered[[1]]
-s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "ensembl_gene_id_version")
-```
-
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
-
-``` r
+s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "hgnc_symbol")
 s3_filtered <- dfs_filtered[[2]]
-s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "ensembl_gene_id_version")
-```
-
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
-
-``` r
+s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "hgnc_symbol")
 s4_filtered <- dfs_filtered[[3]]
-s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "ensembl_gene_id_version")
+s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "hgnc_symbol")
 ```
 
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
-
 ``` r
-s1_gs <- s1_filtered_annotations$`Ensembl ID`
-s3_gs <- s3_filtered_annotations$`Ensembl ID`
-s4_gs <- s4_filtered_annotations$`Ensembl ID`
+s1_gs <- s1_filtered_annotations$Gene
+s3_gs <- s3_filtered_annotations$Gene
+s4_gs <- s4_filtered_annotations$Gene
 genesets <- list(s1_gs, s3_gs, s4_gs)
 names(genesets) <- c("S1", "S3", "S4")
 ```
@@ -1244,62 +1266,21 @@ names(genesets) <- c("S1", "S3", "S4")
 ### Over-representation analysis
 
 ``` r
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://uswest.ensembl.org")
-                #host="www.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="www.ensembl.org") #host = "https://uswest.ensembl.org")
+```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
+
+``` r
 background_genes <- getBM(attributes = "entrezgene_id", 
-                          filters = "ensembl_gene_id_version", 
+                          #filters = "ensembl_gene_id_version", 
+                          filters = "hgnc_symbol",
                           mart = mart,
                           values = rownames(res_not_S1_shrink))
 ```
 
-    ## 
-
-    ## Registered S3 method overwritten by 'ggtree':
-    ##   method      from 
-    ##   identify.gg ggfun
-
-    ## clusterProfiler v4.2.0  For help: https://yulab-smu.top/biomedical-knowledge-mining-book/
-    ## 
-    ## If you use clusterProfiler in published research, please cite:
-    ## T Wu, E Hu, S Xu, M Chen, P Guo, Z Dai, T Feng, L Zhou, W Tang, L Zhan, X Fu, S Liu, X Bo, and G Yu. clusterProfiler 4.0: A universal enrichment tool for interpreting omics data. The Innovation. 2021, 2(3):100141
-
-    ## 
-    ## Attaching package: 'clusterProfiler'
-
-    ## The following object is masked from 'package:IRanges':
-    ## 
-    ##     slice
-
-    ## The following object is masked from 'package:S4Vectors':
-    ## 
-    ##     rename
-
-    ## The following object is masked from 'package:purrr':
-    ## 
-    ##     simplify
-
-    ## The following object is masked from 'package:biomaRt':
-    ## 
-    ##     select
-
-    ## The following object is masked from 'package:stats':
-    ## 
-    ##     filter
-
-    ## Loading required package: AnnotationDbi
-
-    ## 
-    ## Attaching package: 'AnnotationDbi'
-
-    ## The following object is masked from 'package:clusterProfiler':
-    ## 
-    ##     select
-
-    ## The following object is masked from 'package:dplyr':
-    ## 
-    ##     select
-
-    ## 
+![](caf_rnaseq_combined_analysis_files/figure-gfm/ORA-1.png)<!-- -->
 
 ``` r
 dotplot(ego_S1, title = "S1 signature over-representation analysis")
@@ -1335,7 +1316,7 @@ caf_es <- gsva(expr = dds_inhouse,
                mx.diff=FALSE)
 ```
 
-    ## Warning in .filterFeatures(expr, method): 396 genes with constant expression
+    ## Warning in .filterFeatures(expr, method): 247 genes with constant expression
     ## values throuhgout the samples.
 
     ## Warning in .filterFeatures(expr, method): Since argument method!="ssgsea", genes
@@ -1395,8 +1376,8 @@ heatmap(assay(caf_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(subtypeColorLegend[subtypeOrder],
                           times=subtypeXtable[subtypeOrder]),
-        #labCol="", 
-        labCol = caf_es$Patient[sampleOrderBySubtype],
+        labCol="", 
+        #labCol = caf_es$Patient[sampleOrderBySubtype],
         caf_es$Subtype[sampleOrderBySubtype],
         labRow=paste(toupper(substring(geneSetLabels, 1,1)),
                      substring(geneSetLabels, 2), sep=""),
@@ -1425,8 +1406,8 @@ heatmap(assay(caf_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(gradeColorLegend[gradeOrder],
                           times=gradeXtable[gradeOrder]),
-        #labCol="", 
-        labCol = caf_es$Patient[sampleOrderByGrade],
+        labCol="", 
+        #labCol = caf_es$Patient[sampleOrderByGrade],
         caf_es$Subtype[sampleOrderBySubtype],
         labRow=paste(toupper(substring(geneSetLabels, 1,1)),
                      substring(geneSetLabels, 2), sep=""),
@@ -1471,6 +1452,475 @@ mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
 
+``` r
+caf_idx <- which(colData(caf_es)$Tumor_JuxtaTumor == "tumor")
+tan_idx <- which(colData(caf_es)$Tumor_JuxtaTumor == "juxtatumor")
+df_plot_S1 <- cbind.data.frame(S1_ES = assay(caf_es)[1,], Tumor_JuxtaTumor = colData(caf_es)$Tumor_JuxtaTumor)
+gsva_plot_s1 <- ggplot(df_plot_S1, aes(x = Tumor_JuxtaTumor, y = S1_ES)) +
+  geom_point(size = 2,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.1,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5)) +
+  ylab("S1 GSVA ES")  #, axis.title.x = element_blank())
+
+df_plot_S3 <- cbind.data.frame(S3_ES = assay(caf_es)[2,], Tumor_JuxtaTumor = colData(caf_es)$Tumor_JuxtaTumor)
+gsva_plot_s3 <- ggplot(df_plot_S3, aes(x = Tumor_JuxtaTumor, y = S3_ES)) +
+  geom_point(size = 2,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.1,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5)) +
+  ylab("S3 GSVA ES")  #, axis.title.x = element_blank())
+
+df_plot_S4 <- cbind.data.frame(S4_ES = assay(caf_es)[3,], Tumor_JuxtaTumor = colData(caf_es)$Tumor_JuxtaTumor)
+gsva_plot_s4 <- ggplot(df_plot_S4, aes(x = Tumor_JuxtaTumor, y = S4_ES)) +
+  geom_point(size = 2,  # reduce point size to minimize overplotting 
+    position = position_jitter(
+      width = 0.1,  # amount of jitter in horizontal direction
+      height = 0     # amount of jitter in vertical direction (0 = none)
+    )
+  ) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5)) +
+  ylab("S4 GSVA ES")  #, axis.title.x = element_blank())
+```
+
+``` r
+distribution_es_s1 <- df_plot_S1 %>% 
+ggplot(mapping = aes(S1_ES)) +
+  geom_density() +
+  facet_wrap(~Tumor_JuxtaTumor) +
+  theme_linedraw()
+
+distribution_es_s3 <- df_plot_S3 %>% 
+ggplot(mapping = aes(S3_ES)) +
+  geom_density() +
+  facet_wrap(~Tumor_JuxtaTumor) +
+  theme_linedraw()
+
+distribution_es_s4 <- df_plot_S4 %>% 
+ggplot(mapping = aes(S4_ES)) +
+  geom_density() +
+  facet_wrap(~Tumor_JuxtaTumor) +
+  theme_linedraw()
+```
+
+``` r
+top_row <- plot_grid(gsva_plot_s1, gsva_plot_s3, gsva_plot_s4,
+      ncol = 3,
+      labels = c('A', 'B', 'C'),
+      label_fontfamily = 'serif',
+      label_fontface = 'bold',
+      label_size = 15,
+      align = 'h',
+      rel_widths = c(1.10, 0.80, 1.10))
+
+    bottom_row <- plot_grid(distribution_es_s1, distribution_es_s3, distribution_es_s4,
+      ncol = 3,
+      labels = c('D', 'E', 'F'),
+      label_fontfamily = 'serif',
+      label_fontface = 'bold',
+      label_size = 22,
+      align = 'h',
+      rel_widths = c(0.8, 1.2))
+
+    plot_grid(top_row, bottom_row, nrow = 2,
+      rel_heights = c(1.1, 0.9))
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
+
+``` r
+df_plot_S1$S1_ES %>% 
+shapiro.test()
+```
+
+    ## 
+    ##  Shapiro-Wilk normality test
+    ## 
+    ## data:  .
+    ## W = 0.88376, p-value = 0.009899
+
+``` r
+df_plot_S3$S3_ES %>% 
+shapiro.test()
+```
+
+    ## 
+    ##  Shapiro-Wilk normality test
+    ## 
+    ## data:  .
+    ## W = 0.82457, p-value = 0.000764
+
+``` r
+df_plot_S4$S4_ES %>% 
+shapiro.test()
+```
+
+    ## 
+    ##  Shapiro-Wilk normality test
+    ## 
+    ## data:  .
+    ## W = 0.8989, p-value = 0.0204
+
+p \< 0.05, data is not normally distributed. T-test may be unsuitable
+for comparing distributions. Carry out Wilcoxon rank-sum test
+(Mann-Whitney U test).
+
+``` r
+wilcox.test(x = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"] and df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 12, p-value = 0.03418
+    ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+wilcox.test(x = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"] and df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 10, p-value = 0.021
+    ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+wilcox.test(x = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"] and df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 55, p-value = 0.2334
+    ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+median(df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"])
+```
+
+    ## [1] -0.1687633
+
+``` r
+median(df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"])
+```
+
+    ## [1] 0.211911
+
+``` r
+median(df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"])
+```
+
+    ## [1] -0.04473953
+
+``` r
+median(df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"])
+```
+
+    ## [1] 0.420649
+
+We can see from the above that there is a difference between the
+enrichment scores for the gene signatures for the S1 and S3
+subpopulaions between CAF and TAN. We can suggest that the TAN
+(juxta-tumour) samples are enriched for our S1 and S3 gene signatures
+compared to the genes outside the gene signatures, and that this
+enrichment is greater in the TAN samples than in the CAF samples.
+
+``` r
+results_combined <- cbind.data.frame(colData(caf_es)$names, colData(caf_es)$Patient, df_plot_S1$S1_ES, df_plot_S3$S3_ES, df_plot_S4$S4_ES, df_plot_S1$Tumor_JuxtaTumor, colData(caf_es)$Subtype, colData(caf_es)$Grade, colData(caf_es)$Histology)
+colnames(results_combined) <- c("Sample", "Patient", "S1_ES", "S3_ES", "S4_ES", "Tumor_JuxtaTumor", "Subtype", "Grade", "Histology")
+results_combined
+```
+
+    ##    Sample Patient      S1_ES      S3_ES      S4_ES Tumor_JuxtaTumor  Subtype
+    ## 1    4033       1 -0.2111870  0.2282682  0.4511291            tumor LuminalA
+    ## 2    4034       1  0.1667547  0.2602349 -0.2104131       juxtatumor LuminalA
+    ## 3    4027       2 -0.3911261 -0.5744436  0.5483698            tumor     TNBC
+    ## 4    4028       2 -0.3006402 -0.4322374 -0.4128925       juxtatumor     TNBC
+    ## 5    4112       3  0.3408958 -0.3317912  0.2026432            tumor LuminalA
+    ## 6    4113       3  0.3192418  0.5494366 -0.1568331       juxtatumor LuminalA
+    ## 7    4116       4 -0.3791867 -0.3831630 -0.6103717            tumor LuminalA
+    ## 8    4117       4 -0.2337296 -0.2289328 -0.3081449       juxtatumor LuminalA
+    ## 9    4214       5  0.2261749  0.5747017  0.5845368            tumor LuminalA
+    ## 10   4215       5  0.2202032  0.3547532  0.2426352       juxtatumor LuminalA
+    ## 11   4315       6  0.3229567  0.5416024  0.5350491            tumor LuminalA
+    ## 12   4316       6  0.3736564  0.6030234  0.3862160       juxtatumor LuminalA
+    ## 13   4340       7 -0.2435243 -0.6432975 -0.4944882            tumor LuminalA
+    ## 14   4341       7  0.2036188  0.2515679 -0.4312309       juxtatumor LuminalA
+    ## 15   4344       8  0.1594359  0.4920567 -0.2643276            tumor LuminalA
+    ## 16   4345       8 -0.2293861  0.4467967 -0.3578373       juxtatumor LuminalA
+    ## 17   3532       9 -0.2008142  0.3100232 -0.3087708            tumor LuminalA
+    ## 18   3533       9  0.2411840  0.3945014  0.1800844       juxtatumor LuminalA
+    ## 19   3536      10 -0.1367123  0.5282220  0.3053018            tumor LuminalA
+    ## 20   3537      10  0.2672011  0.5898932 -0.2313765       juxtatumor LuminalA
+    ## 21   4299      11  0.1797552 -0.3177473 -0.2203716            tumor LuminalA
+    ## 22   4300      11  0.4438534  0.5556149  0.2794237       juxtatumor LuminalA
+    ## 23   4722      12 -0.4150383 -0.4818981  0.5708118            tumor LuminalA
+    ## 24   4723      12 -0.1783413  0.5212709  0.4818895       juxtatumor LuminalA
+    ##      Grade Histology
+    ## 1  Grade_2   Lobular
+    ## 2  Grade_2   Lobular
+    ## 3  Grade_3    Ductal
+    ## 4  Grade_3    Ductal
+    ## 5  Grade_3    Ductal
+    ## 6  Grade_3    Ductal
+    ## 7  Grade_2   Lobular
+    ## 8  Grade_2   Lobular
+    ## 9  Grade_2   Lobular
+    ## 10 Grade_2   Lobular
+    ## 11 Grade_2    Ductal
+    ## 12 Grade_2    Ductal
+    ## 13 Grade_2   Lobular
+    ## 14 Grade_2   Lobular
+    ## 15 Grade_2    Ductal
+    ## 16 Grade_2    Ductal
+    ## 17 Grade_2    Ductal
+    ## 18 Grade_2    Ductal
+    ## 19 Grade_3   Lobular
+    ## 20 Grade_3   Lobular
+    ## 21 Grade_3    Ductal
+    ## 22 Grade_3    Ductal
+    ## 23 Grade_2   Lobular
+    ## 24 Grade_2   Lobular
+
+### Chemoresistance gene signature
+
+Su et al 2018 carried out differential expression analysis between
+chemoresistant and chemosensitive CAFs from breast cancer. It is
+possible to try and identify the resulting signature in our samples. We
+will use the list of upregulated genes in chemoresistant samples as our
+marker of chemoresistance and the genes downregulated in the
+chemoresistant cells as our marker of chemosensitivity.
+
+The HGNCHelper package can be used to fix outdated gene symbols.
+
+``` r
+gene_signature <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/1-s2.0-S0092867418300448-mmc1.csv", skip = 1)
+gene_signature_loc <- gene_signature[str_detect(gene_signature$Gene.name, pattern = "^LOC\\d+$"),]
+# write to file and look up loc gene signatures manually, read back in as gene_signature_loc_official
+#write.table(gene_signature_loc, file = "/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc.txt", quote = F, row.names = F)
+gene_signature_loc_official <- read.table("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc_official_names.txt", header = T)
+gene_signature_proper_names <- gene_signature
+gene_signature_proper_names$Official_name <- gene_signature$Gene.name
+idx <- match(gene_signature_loc$Gene.name, gene_signature$Gene.name)
+gene_signature_proper_names[idx,]$Official_name <- gene_signature_loc_official$Official_symbol
+gene_signature_proper_names <- drop_na(gene_signature_proper_names)
+row_remove <- which(gene_signature_proper_names$Gene.name == "N/A")
+gene_signature_proper_names <- gene_signature_proper_names[-c(row_remove),]
+gene_signature_hgnc <- checkGeneSymbols(gene_signature_proper_names$Official_name, species = "human")
+```
+
+    ## Maps last updated on: Thu Oct 24 12:31:05 2019
+
+    ## Warning in checkGeneSymbols(gene_signature_proper_names$Official_name, species
+    ## = "human"): Human gene symbols should be all upper-case except for the 'orf' in
+    ## open reading frames. The case of some letters was corrected.
+
+    ## Warning in checkGeneSymbols(gene_signature_proper_names$Official_name, species =
+    ## "human"): x contains non-approved gene symbols
+
+``` r
+gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "CCRL1")] <- NA
+gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "FLJ40504")] <- NA
+gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "LETR1")] <- "LETR1"
+gene_signature_hgnc <- drop_na(gene_signature_hgnc)
+colnames(gene_signature_hgnc) <- c("Gene.name", "Approved", "Suggested.Symbol")
+gene_signature_join <- full_join(gene_signature, gene_signature_hgnc, by = "Gene.name")
+gene_signature_chemoresistance <- gene_signature_join$Suggested.Symbol[which(gene_signature_join$Regulation == "up")]
+gene_signature_chemoresistance <- gene_signature_chemoresistance[!is.na(gene_signature_chemoresistance)]
+gene_signature_chemosensitivity <- gene_signature_join$Suggested.Symbol[which(gene_signature_join$Regulation == "down")]
+gene_signature_chemosensitivity<- gene_signature_chemosensitivity[!is.na(gene_signature_chemosensitivity)]
+genesets_chemo <- list(gene_signature_chemoresistance, gene_signature_chemosensitivity)
+names(genesets_chemo) <- c("Chemoresistance", "Chemosensitive")
+```
+
+``` r
+chemo_es <- gsva(expr = dds_inhouse,
+               gset.idx.list = genesets_chemo,
+               method = "gsva",
+               kcdf = "Poisson",
+               mx.diff=FALSE)
+```
+
+    ## Warning in .filterFeatures(expr, method): 247 genes with constant expression
+    ## values throuhgout the samples.
+
+    ## Warning in .filterFeatures(expr, method): Since argument method!="ssgsea", genes
+    ## with constant expression values are discarded.
+
+    ## Estimating GSVA scores for 2 gene sets.
+    ## Estimating ECDFs with Poisson kernels
+    ##   |                                                                              |                                                                      |   0%  |                                                                              |===================================                                   |  50%  |                                                                              |======================================================================| 100%
+
+``` r
+chemo_es$Patient <- inhouse_metadata$Patient
+chemo_es$Subtype <- inhouse_metadata$Subtype
+chemo_es$Grade <- inhouse_metadata$Grade
+chemo_es$Histology <- inhouse_metadata$Histology
+```
+
+``` r
+assay(chemo_es)
+```
+
+    ##                       4033       4034       4027       4028       4112
+    ## Chemoresistance  0.2511948  0.1835208 -0.2275412 -0.2921821 -0.1549386
+    ## Chemosensitive  -0.2884295 -0.2617528 -0.3135180 -0.4803626  0.3979869
+    ##                      4113       4116       4117      4214       4215      4315
+    ## Chemoresistance 0.2922223 -0.3305799 -0.3323113 0.1485889 -0.2558840 0.2260738
+    ## Chemosensitive  0.5291087 -0.6315582 -0.3175666 0.4718418  0.3953624 0.5808599
+    ##                      4316       4340       4341       4344       4345
+    ## Chemoresistance 0.2115296 -0.2499012  0.2918001 -0.3521381 -0.2333033
+    ## Chemosensitive  0.5089124 -0.3752032 -0.2284608 -0.3360215  0.2964242
+    ##                       3532      3533       3536      3537       4299      4300
+    ## Chemoresistance -0.3312907 0.3284542  0.2863740 0.2172434  0.4309208 0.2723313
+    ## Chemosensitive  -0.3923255 0.3729971 -0.2635225 0.3420735 -0.2614191 0.4182203
+    ##                       4722       4723
+    ## Chemoresistance -0.2989202 -0.2909116
+    ## Chemosensitive  -0.2995230 -0.2494366
+
+``` r
+subpopulationOrder <- c("tumor", "juxtatumor")
+sampleOrderBySubpopulation <- sort(match(chemo_es$Tumor_JuxtaTumor, subpopulationOrder),
+                             index.return=TRUE)$ix
+subpopulationXtable <- table(chemo_es$Tumor_JuxtaTumor)
+subpopulationColorLegend <- c(tumor="red", juxtatumor="green")
+geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetLabels <- geneSetOrder
+hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
+hmcol <- hmcol[length(hmcol):1]
+heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubpopulation], Rowv=NA,
+        Colv=NA, scale="row", margins=c(3,5), col=hmcol,
+        ColSideColors=rep(subpopulationColorLegend[subpopulationOrder],
+                          times=subpopulationXtable[subpopulationOrder]),
+        labCol="", 
+        chemo_es$Tumor_JuxtaTumor[sampleOrderBySubpopulation],
+        labRow=paste(toupper(substring(geneSetLabels, 1,1)),
+                     substring(geneSetLabels, 2), sep=""),
+        cexRow=2, main=" \n ")
+par(xpd=TRUE)
+text(0.285,1.1, "CAF", col="red", cex=1.2)
+text(0.55,1.1, "TAN", col="green", cex=1.2)
+#text(0.47,1.21, "S4", col="blue", cex=1.2)
+mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-1.png)<!-- -->
+
+``` r
+subtypeOrder <- c("LuminalA", "TNBC")
+sampleOrderBySubtype <- sort(match(chemo_es$Subtype, subtypeOrder),
+                             index.return=TRUE)$ix
+subtypeXtable <- table(chemo_es$Subtype)
+subtypeColorLegend <- c(LuminalA="red", TNBC="green")
+geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetLabels <- geneSetOrder
+hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
+hmcol <- hmcol[length(hmcol):1]
+heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
+        Colv=NA, scale="row", margins=c(3,5), col=hmcol,
+        ColSideColors=rep(subtypeColorLegend[subtypeOrder],
+                          times=subtypeXtable[subtypeOrder]),
+        labCol="", 
+        #labCol = caf_es$Patient[sampleOrderBySubtype],
+        chemo_es$Subtype[sampleOrderBySubtype],
+        labRow=paste(toupper(substring(geneSetLabels, 1,1)),
+                     substring(geneSetLabels, 2), sep=""),
+        cexRow=2, main=" \n ")
+par(xpd=TRUE)
+text(0.4,1.1, "LuminalA", col="red", cex=1.2)
+text(0.65,1.1, "TNBC", col="green", cex=1.2)
+#text(0.47,1.21, "S4", col="blue", cex=1.2)
+mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-2.png)<!-- -->
+
+``` r
+gradeOrder <- c("Grade_2", "Grade_3")
+sampleOrderByGrade <- sort(match(chemo_es$Grade, gradeOrder),
+                             index.return=TRUE)$ix
+gradeXtable <- table(chemo_es$Grade)
+gradeColorLegend <- c(Grade_2="red", Grade_3="green")
+geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetLabels <- geneSetOrder
+hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
+hmcol <- hmcol[length(hmcol):1]
+heatmap(assay(chemo_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
+        Colv=NA, scale="row", margins=c(3,5), col=hmcol,
+        ColSideColors=rep(gradeColorLegend[gradeOrder],
+                          times=gradeXtable[gradeOrder]),
+        labCol="", 
+        #labCol = caf_es$Patient[sampleOrderByGrade],
+        chemo_es$Subtype[sampleOrderBySubtype],
+        labRow=paste(toupper(substring(geneSetLabels, 1,1)),
+                     substring(geneSetLabels, 2), sep=""),
+        cexRow=2, main=" \n ")
+par(xpd=TRUE)
+text(0.34,1.1, "Grade 2", col="red", cex=1.2)
+text(0.6,1.1, "Grade 3", col="green", cex=1.2)
+#text(0.47,1.21, "S4", col="blue", cex=1.2)
+mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+```
+
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-3.png)<!-- -->
+
+``` r
+chemoresistance_ratio <- function(df){
+  out <- data.frame(Patient = df$Patient,)
+}
+as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Chemoresistance)/abs(Chemosensitive))
+```
+
+    ## # A tibble: 24 × 4
+    ##    Chemoresistance Chemosensitive Patient Chemoresistance_ratio
+    ##              <dbl>          <dbl>   <int>                 <dbl>
+    ##  1           0.251         -0.288       1                 0.871
+    ##  2           0.184         -0.262       1                 0.701
+    ##  3          -0.228         -0.314       2                 0.726
+    ##  4          -0.292         -0.480       2                 0.608
+    ##  5          -0.155          0.398       3                 0.389
+    ##  6           0.292          0.529       3                 0.552
+    ##  7          -0.331         -0.632       4                 0.523
+    ##  8          -0.332         -0.318       4                 1.05 
+    ##  9           0.149          0.472       5                 0.315
+    ## 10          -0.256          0.395       5                 0.647
+    ## # … with 14 more rows
+    ## # ℹ Use `print(n = ...)` to see more rows
+
 ### Marker gene expression
 
 Source: GeneCards
@@ -1497,20 +1947,14 @@ through manual curation: FSP1, CAV1, DPP4
 
 ``` r
 # want to create 'background' gene set entrez id + LFC values for all genes
-info <- getBM(attributes = c("hgnc_symbol", "entrezgene_id", "ensembl_gene_id_version"),
-              mart=mart, filters = "ensembl_gene_id_version", values = rownames(dds))
-```
-
-``` r
-# want to create 'background' gene set entrez id + LFC values for all genes
-info <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"),
-              mart=mart, filters = "ensembl_gene_id_version", values = rownames(dds))
+#info <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"),
+ #             mart=mart, filters = "ensembl_gene_id_version", values = rownames(dds))
 info2 <- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"),
-              mart=mart, filters = "ensembl_gene_id", values = str_split_fixed(string = rownames(dds), pattern ="\\.", n = 2)[,1])
+              mart=mart, filters = "hgnc_symbol", values = str_split_fixed(string = rownames(dds), pattern ="\\.", n = 2)[,1])
 ```
 
 ``` r
-create_df_plotcounts <- function(dds, gene_interest, info){
+create_df_plotcounts <- function(dds, gene_interest, info, symbol_type_dds = "hgnc_symbol"){
   library(DESeq2)
   library(biomaRt)
   # put check for type of gene symbol in dds object, assuming ensembl gene version atm
@@ -1518,13 +1962,26 @@ create_df_plotcounts <- function(dds, gene_interest, info){
   info = info[!duplicated(info$hgnc_symbol),]
   rownames(info) = info$hgnc_symbol
   # assuming genes interest are in info, put in check for this to deal with missing gene symbol
-  gene_interest_info <- info[gene_interest,]
+  if (!(gene_interest %in% info$hgnc_symbol)){
+    print(paste(gene_interest, "not found in table of hgnc symbols", sep = " "))
+    geneCounts <- NA
+  } else {
+    gene_interest_info <- info[gene_interest,]
   #print(gene_interest_info)
-  gene_ensg <- info$ensembl_gene_id[which(info$hgnc_symbol == gene_interest)]
+    if (symbol_type_dds == "ensembl_gene_id_version"){
+      gene_ensg <- info$ensembl_gene_id[which(info$hgnc_symbol == gene_interest)]
   # find ENSG1234.1 in dds object given ENGS1234
-  idx <- str_detect(rownames(assay(dds)), paste0(gene_ensg, "\\.."))
-  gene_ensg_version <- rownames(assay(dds))[idx] 
-  geneCounts <- plotCounts(dds, gene = gene_ensg_version, intgroup = c("Study", "Subpopulation", "Tumor_JuxtaTumor"), returnData = TRUE)
+      idx <- str_detect(rownames(assay(dds)), paste0(gene_ensg, "\\.."))
+      gene_correct_version <- rownames(assay(dds))[idx]
+  } else if (symbol_type_dds == "hgnc_symbol"){
+    #idx <- str_detect(rownames(assay(dds)), gene_interest)
+    #gene_correct_version <- rownames(assay(dds))[idx]
+      gene_correct_version <- gene_interest
+  } else {
+    stop("symbol_type_dds must be one of hgnc_symbol or ensembl_gene_id_version")
+  }
+    geneCounts <- plotCounts(dds, gene = gene_correct_version, intgroup = c("Study", "Subpopulation", "Tumor_JuxtaTumor"), returnData = TRUE)
+  }
 }
 
 
@@ -1617,19 +2074,34 @@ ggar_obj_study_annotated
 genes_interest <- c("CXCL12","TNFSF4","PDCD1LG2", "CD276", "NT5E", "DPP4", "CAV1", "ATL1")
 genes_interest_common_names <- c("CXCL12", "OX40L", "PDL2", "B7H3", "CD73", "DPP4", "CAV1", "FSP1")
 annotated_dfs_for_plotting <- lapply(X = genes_interest, FUN = create_df_plotcounts, dds = dds, info = info2)
+```
+
+    ## [1] "PDCD1LG2 not found in table of hgnc symbols"
+
+``` r
 names(annotated_dfs_for_plotting) <- genes_interest
 plots_out_tumor_juxtatumor <- list()
 for (i in 1:length(annotated_dfs_for_plotting)){
-  plt <- caf_plot_tumour_juxtatumour(df_for_plotting = annotated_dfs_for_plotting[[i]], 
-                                                                   gene = genes_interest_common_names[i])
-  plots_out_tumor_juxtatumor[[i]] = plt
+  if (is.null(dim(annotated_dfs_for_plotting[[i]]))){
+    next
+  } else {
+    plt <- caf_plot_tumour_juxtatumour(df_for_plotting = annotated_dfs_for_plotting[[i]], 
+                                                    gene = genes_interest_common_names[i])
+    plots_out_tumor_juxtatumor[[i]] = plt
+  }
 }
+plots_out_tumor_juxtatumor <- plots_out_tumor_juxtatumor[lengths(plots_out_tumor_juxtatumor) != 0]
 plots_out_study <- list()
 for (i in 1:length(annotated_dfs_for_plotting)){
-  plt <- caf_plot_study(df_for_plotting = annotated_dfs_for_plotting[[i]], 
+  if (is.null(dim(annotated_dfs_for_plotting[[i]]))){
+    next
+  } else {
+    plt <- caf_plot_study(df_for_plotting = annotated_dfs_for_plotting[[i]], 
                         gene = genes_interest_common_names[i])
-  plots_out_study[[i]] = plt
+    plots_out_study[[i]] = plt
+  }
 }
+plots_out_study <- plots_out_study[lengths(plots_out_study) != 0]
 ggar_obj_tumor_juxtatumor <- ggarrange(plotlist = plots_out_tumor_juxtatumor, common.legend = TRUE) # rel_heights values control title margins
 ggar_obj_tumor_juxtatumor_annotated <- annotate_figure(ggar_obj_tumor_juxtatumor, bottom = text_grob("CAF Subpopulation"))
 ggar_obj_study <- ggarrange(plotlist = plots_out_study, common.legend = TRUE) # rel_heights values control title margins
@@ -1788,7 +2260,7 @@ dds_adjusted_all <- DESeq(dds_adjusted_all)
 
     ## fitting model and testing
 
-    ## -- replacing outliers and refitting for 890 genes
+    ## -- replacing outliers and refitting for 690 genes
     ## -- DESeq argument 'minReplicatesForReplace' = 7 
     ## -- original counts are preserved in counts(dds)
 
@@ -1817,10 +2289,10 @@ library(org.Hs.eg.db)
 master_lfc1 <- rbind(up,down)
 # want to create 'background' gene set entrez id + LFC values for all genes
 info <- getBM(attributes = c("hgnc_symbol", "entrezgene_id", "ensembl_gene_id_version"),
-              mart=mart, filters = "ensembl_gene_id_version", values = rownames(lfc_df))
+              mart=mart, filters = "hgnc_symbol", values = rownames(lfc_df))
 
 lfc_df$Gene <- rownames(lfc_df)
-tmp <- merge(info, lfc_df, by.x="ensembl_gene_id_version", by.y="Gene")
+tmp <- merge(info, lfc_df, by.x="hgnc_symbol", by.y="Gene")
 
 background <- tmp$log2FoldChange
 names(background) <- tmp$hgnc_symbol
@@ -1856,7 +2328,7 @@ egmt <- GSEA(background,
 
     ## GSEA analysis...
 
-    ## Warning in preparePathwaysAndStats(pathways, stats, minSize, maxSize, gseaParam, : There are ties in the preranked stats (0.36% of the list).
+    ## Warning in preparePathwaysAndStats(pathways, stats, minSize, maxSize, gseaParam, : There are ties in the preranked stats (10.48% of the list).
     ## The order of those tied genes will be arbitrary, which may produce unexpected results.
 
     ## Warning in preparePathwaysAndStats(pathways, stats, minSize, maxSize,
@@ -1879,7 +2351,7 @@ egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue,
 dotplot(egmt, title = "GSEA HALLMARKS", x="NES")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-39-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-46-1.png)<!-- -->
 
 ### Enrichment plots
 
@@ -1891,7 +2363,7 @@ for(i in 1:5){
 }
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-40-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-40-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-40-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-40-5.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-47-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-47-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-47-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-47-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-47-5.png)<!-- -->
 
 #### GO Biological Processes GSEA
 
@@ -1916,24 +2388,30 @@ egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue,
 egmt_subs[1:5,]
 ```
 
-    ##                                       Description enrichmentScore      NES
-    ## GOBP_LEUKOCYTE_MIGRATION GOBP_LEUKOCYTE_MIGRATION       0.7226006 1.711161
-    ## GOBP_CELL_MIGRATION           GOBP_CELL_MIGRATION       0.6141978 1.488199
-    ## GOBP_CELL_CELL_ADHESION   GOBP_CELL_CELL_ADHESION       0.6724923 1.612321
-    ## GOBP_CELL_ACTIVATION         GOBP_CELL_ACTIVATION       0.6232022 1.507669
-    ## GOBP_BIOLOGICAL_ADHESION GOBP_BIOLOGICAL_ADHESION       0.6137679 1.485361
-    ##                                pvalue    p.adjust
-    ## GOBP_LEUKOCYTE_MIGRATION 8.434753e-07 0.003191504
-    ## GOBP_CELL_MIGRATION      1.600672e-06 0.003191504
-    ## GOBP_CELL_CELL_ADHESION  1.638276e-06 0.003191504
-    ## GOBP_CELL_ACTIVATION     1.773631e-06 0.003191504
-    ## GOBP_BIOLOGICAL_ADHESION 2.531025e-06 0.003191504
-    ##                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            core_enrichment
-    ## GOBP_LEUKOCYTE_MIGRATION                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    CEACAM6/S100A9/IGLV2-14/GATA3/CXCL10/CCL19/S100A8/PADI2/CRTAM/ESAM/F2RL1/CCL21/CCL5/LGALS9/S100A14/TGFB2/ADGRE2/SLAMF8/GPR183/ITGA3/GPSM3/ITGA4/CXADR/F11R/FCER1G/ADAM8/TRPM4/SDC1/VCAM1/OXSR1
-    ## GOBP_CELL_MIGRATION      CEACAM6/S100A9/IGLV2-14/GATA3/CXCL10/CCL19/S100A8/SHROOM2/MMP7/PADI2/STC1/ERBB4/CRTAM/CLDN1/ESAM/F2RL1/CCL21/CCL5/PARD6B/EFNB2/AJUBA/CELSR2/MGAT3/LGALS9/S100A14/FOXC2/PIK3R3/TGFB2/JAG1/NTF3/LEF1/CCN4/PHLDA2/ADGRE2/PDGFA/P2RY1/SLAMF8/GPR183/CSPG4/SORL1/SULF1/FGF13/ITGA3/GPSM3/SEMA7A/ITGA4/CXADR/FOXC1/F11R/CD274/CDH13/FCER1G/FGF1/ADAM8/TRPM4/TMSB15A/SIX4/SDC1/VCAM1/MCAM/DUSP10/STARD13/FMNL3/CDK5R1/F2R/OXSR1/ETS1/SINHCAF/BVES/SLC9A3R1/POSTN/ARHGDIB/SEMA5A/HES1/HACE1/EPHA3/GPC1/NR4A3/TIMP1/ZP3/ARSB/DAPK3/PALLD/HIF1A/BCAR1/HBEGF/SSH1/PTK2B/RAP2A/NET1/MIIP/PTK7/EPHA1/CDKN2B-AS1/SYNJ2BP/ZNF703/PLXNB1/ZNF580/SHTN1/LRCH1/PTPRF/EPHA4/IGF1R/PSTPIP2/NEDD9/SNAI1/PDGFC/CDK5/NCKAP1/PEX13/FERMT2/ARPC5/BAG4/ENPEP/PPARD/PLAA/CCN2/CRKL/TNFAIP1/EPHB4/PDCD10/PLEKHO1/SPATA13/HGF/JCAD/PDLIM1/TNFRSF10B/LAMA5/C5AR1/NCK2/ADAMTS12/FZD3/SPDL1/PLXNA2
-    ## GOBP_CELL_CELL_ADHESION                                                                                                                                                                                                                                                                                                                                                                                                                         CEACAM6/S100A9/GATA3/DSG3/CCL19/S100A8/KRT18/CDH8/IL7R/NRARP/CRTAM/CLDN1/ESAM/CDH6/EMB/DSC3/CCL21/CCL5/CD4/IGFBP2/AJUBA/CELSR2/SPINT2/KIF26B/LGALS9/FBLIM1/TGFB2/JAG1/LEF1/PAG1/CD93/ITGA4/TNFSF4/CXADR/F11R/CD274/CDH13/ADAM8/VCAM1/DUSP10/NECTIN2/CDK5R1/ETS1/NLGN4X/HLA-A/BVES/HES1/IDO1/KIFC3/NR4A3/IL15/VMP1/ALCAM/CDH11/PDLIM5/ZP3/MYL9/TMEM131L/PALLD/METAP1/DLG1/IL1RAP/CSRP1/TNFRSF21/TMEM47/SYNJ2BP/ZNF703/PELI1/PTPRF/PAWR/DLG3
-    ## GOBP_CELL_ACTIVATION                                                                                                                                                                                                                                                                                                                                            CEACAM6/S100A9/IGHG1/CST7/GATA3/CXCL10/CCL19/S100A8/SOX11/CD53/PADI2/MGAM/IL7R/NRARP/CRTAM/GMFG/F2RL1/MNDA/CCL21/CCL5/ULBP2/CD4/TRBC2/IGFBP2/TRPC6/LGALS9/INHBA/HLA-F/SVIP/LEF1/MICB/ADGRE2/PDGFA/PAG1/P2RY1/CD93/SLAMF8/GPR183/VAMP8/ITGA4/TNFSF4/BATF2/CXADR/ADGRF5/F11R/CD274/FCER1G/ADAM8/CAMK4/PRDM1/VCAM1/TEC/GNA14/TRPC3/HSPA6/ITPR2/DUSP10/NECTIN2/F2RL2/F2R/GCA/HLA-A/HES1/IDO1/NR4A3/IL15/TIMP1/ZP3/ARSB/MYL9/TMEM131L/CPPED1/DNASE1L1/SYT11/HSPA1B/METAP1/FRK/DLG1/CSRP1/GLIPR1/RAB31/TNFRSF21/PTK2B/HLA-H/CNN2
-    ## GOBP_BIOLOGICAL_ADHESION                                         CEACAM6/AGR2/S100A9/IBSP/GATA3/DSG3/CCL19/S100A8/KRT18/MPZL3/CDH8/IL7R/NRARP/CRTAM/CYTIP/CLDN1/ESAM/AZGP1/CDH6/EMB/DSC3/CCL21/CCL5/CD4/IGFBP2/EFNB2/AJUBA/CELSR2/SPINT2/KIF26B/LGALS9/FBLIM1/FOXC2/TGFB2/JAG1/LEF1/CCN4/LYPD3/ITGA10/COL18A1/EDIL3/ADGRE2/VWA2/PAG1/CD93/IGFBP7/ENTPD1/ITGA3/ITGA4/TNFSF4/CXADR/F11R/CD274/CDH13/ADAM8/COL8A1/VCAM1/MCAM/DUSP10/NECTIN2/MICALL2/CDK5R1/ETS1/NLGN4X/HLA-A/BVES/ZFHX3/POSTN/ARHGDIB/SEMA5A/HES1/IDO1/EPHA3/KIFC3/NR4A3/IL15/WHAMM/VMP1/ALCAM/CDH11/PDLIM5/ZP3/MYL9/TMEM131L/DAPK3/PALLD/BCAR1/METAP1/DLG1/IL1RAP/CSRP1/TNFRSF21/PTK2B/EGFLAM/PTK7/EPHA1/TMEM47/SYNJ2BP/ZNF703/PLXNB1/TGM2/PELI1/PTPRF/EPHA4/PLEKHA2/NEDD9/PAWR/DLG3/CDK5/FERMT2/BAG4/AOC3/RC3H2/PPARD/TGFBI/CCN2/ANK3/CRKL/ARPC2/PPFIBP1/PCDH10/EPHB4/GPM6B/STX3/JCAD/PDLIM1/LAMA5/CNN3/NCK2/TWSG1/ADAMTS12
+    ##                                                                           Description
+    ## GOBP_CELL_CELL_ADHESION                                       GOBP_CELL_CELL_ADHESION
+    ## GOBP_LIPID_LOCALIZATION                                       GOBP_LIPID_LOCALIZATION
+    ## GOBP_FATTY_ACID_METABOLIC_PROCESS                   GOBP_FATTY_ACID_METABOLIC_PROCESS
+    ## GOBP_LEUKOCYTE_CHEMOTAXIS                                   GOBP_LEUKOCYTE_CHEMOTAXIS
+    ## GOBP_MONOCARBOXYLIC_ACID_METABOLIC_PROCESS GOBP_MONOCARBOXYLIC_ACID_METABOLIC_PROCESS
+    ##                                            enrichmentScore       NES
+    ## GOBP_CELL_CELL_ADHESION                          0.5856096  1.472390
+    ## GOBP_LIPID_LOCALIZATION                         -0.4293036 -1.527404
+    ## GOBP_FATTY_ACID_METABOLIC_PROCESS               -0.4567706 -1.591681
+    ## GOBP_LEUKOCYTE_CHEMOTAXIS                        0.6986392  1.676431
+    ## GOBP_MONOCARBOXYLIC_ACID_METABOLIC_PROCESS      -0.3981489 -1.441785
+    ##                                                  pvalue   p.adjust
+    ## GOBP_CELL_CELL_ADHESION                    4.742894e-06 0.03511639
+    ## GOBP_LIPID_LOCALIZATION                    1.722103e-05 0.04445667
+    ## GOBP_FATTY_ACID_METABOLIC_PROCESS          3.091114e-05 0.04445667
+    ## GOBP_LEUKOCYTE_CHEMOTAXIS                  3.523306e-05 0.04445667
+    ## GOBP_MONOCARBOXYLIC_ACID_METABOLIC_PROCESS 3.769933e-05 0.04445667
+    ##                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            core_enrichment
+    ## GOBP_CELL_CELL_ADHESION                    CEACAM6/S100A9/GATA3/DSG3/CCL19/S100A8/KRT18/CXCL13/CDH8/DSC2/IL7R/NRARP/CRTAM/PCDH1/ESAM/CDH6/CLDN1/NRXN3/EMB/CADM1/ADGRL3/DSC3/CCL21/CCL5/CCL5/CD4/IGFBP2/CYFIP2/AJUBA/CELSR2/KIF26B/KIF26B/SPINT2/LGALS9/FBLIM1/TGFB2/JAG1/AMIGO2/LEF1/JAK3/PAG1/CD93/ITGA4/CXADR/TNFSF4/F11R/NPNT/ADAM8/CDH13/CD274/ADAM19/VCAM1/SPARCL1/RUNX1/RUNX1/DUSP10/NECTIN2/FN1/NLGN4X/PCDH7/CDK5R1/ETS1/MYL12A/HSPB1/PCDHA10/HLA-A/HLA-A/HLA-A/HLA-A/HLA-A/HLA-A/HLA-A/HLA-A/BVES/LPP/HES1/IL15/PLXNB2/ZP3/PDLIM5/ALCAM/PTK2/MDK/VMP1/MYL9/NR4A3/KIFC3/TMEM131L/MYH9/CDH11/PALLD/METAP1/PRKG1/IL1RAP/CSRP1/DLG1/CASP3/ADGRL1/ADGRL1/TNFRSF21/ITGAV/SYNJ2BP/CDC42/ZNF703/OBSCN/TTYH1/TTYH1/TTYH1/TTYH1/TMEM47/PELI1
+    ## GOBP_LIPID_LOCALIZATION                                                                                                                                                                                                                                                                                                                                                       SLC66A2/ARL6IP5/ACACA/ACACA/LIMA1/VPS51/RXRA/AGTR1/ABCG1/PLIN2/AUP1/TSKU/PER2/ABCA10/APOL4/HEXB/FZD4/PSAP/SLC27A1/LIPC/BDKRB2/ACSL1/NR1H3/SERPINA5/PTGES/OSBPL1A/SLC1A5/MAP2K6/ABCA1/NMB/FABP5/IL6/NFKBIA/PLTP/GULP1/APOD/APOC1/CLU/ANXA1/SLC10A3/SLC17A7/ABCA6/ADORA2A/ACACB/MEST/ACE/ABCA9/C3/ABCC2/LPL/ABCA8/ATP8B4/PPARG/CD36/AKR1C1/PLA2G2A/DGAT2/FABP4
+    ## GOBP_FATTY_ACID_METABOLIC_PROCESS                                                                                                                                                                                                                       HADHA/PTGS1/GSTZ1/ECHDC2/TNFRSF1A/GSTM2/NAAA/PLP1/MAPK14/DEGS1/ILVBL/CRYL1/HSD17B8/HSD17B8/HSD17B8/HSD17B8/HSD17B8/HSD17B8/MID1IP1/EPHX2/MGLL/MCAT/PECR/ACOX2/SLC27A3/SLC27A3/ECI2/XBP1/PTGDS/ACACA/ACACA/ECI1/PCCB/PEDS1/PHYH/BDH2/DLD/ERLIN1/PER2/SLC27A1/LIPC/ALDH3A2/PAM/ACSL1/TWIST1/NR1H3/ACAT1/PTGES/SESN2/SESN2/FABP5/SCD/GSTP1/GPX4/MAPK3/APOC1/PDK4/HSD17B4/ANXA1/PCK2/PCK2/ACACB/PDK2/GPAM/PTGIS/AKR1C3/PON3/C3/LPL/PPARG/CD36/AKR1C1/ACADL/CYP4F12/AKR1C2/MLXIPL/DGAT2
+    ## GOBP_LEUKOCYTE_CHEMOTAXIS                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            S100A9/CXCL10/CCL19/S100A8/CXCL13/PADI2/F2RL1/CCL21/CCL5/CCL5/S100A14/LGALS9/TGFB2/ADGRE2/SLAMF8/ITGA1/GPR183/GPSM3/GPSM3/GPSM3/GPSM3/GPSM3/GPSM3/GPSM3/CXADR/ADAM8/FCER1G/TRPM4/OXSR1/THBS1/PTK2/MDK
+    ## GOBP_MONOCARBOXYLIC_ACID_METABOLIC_PROCESS                                         GSTZ1/ECHDC2/TNFRSF1A/PFKFB3/GSTM2/NAAA/PLP1/MAPK14/ALDH1A3/DEGS1/CKB/ILVBL/CRYL1/HSD17B8/HSD17B8/HSD17B8/HSD17B8/HSD17B8/HSD17B8/MID1IP1/MCCC1/EPHX2/MGLL/MCAT/PRKCE/PECR/ACOX2/SLC27A3/SLC27A3/P2RX7/ECI2/IDH1/XBP1/CRABP2/CYP27C1/PTGDS/TPR/ACACA/ACACA/ECI1/PCCB/HYI/PEDS1/PHYH/BDH2/DLD/SLC4A4/PGD/ERLIN1/PER2/INSR/ARNT/ADH1B/SLC27A1/LIPC/ALDH3A2/PAM/DDIT4/RDH10/ACSL1/TWIST1/NR1H3/ACAT1/PTGES/SESN2/SESN2/NUPR1/OSBPL1A/HSD3B7/FABP5/SCD/GSTP1/GPX4/ADH1C/IGF1/PHGDH/MAPK3/APOC1/PDK4/ME1/HSD17B4/ANXA1/PCK2/PCK2/RAE1/ACACB/CYP26B1/PDK2/CYP3A5/GPAM/PTGIS/AKR1C3/PON3/C3/ABCC2/LPL/PPARG/CD36/AKR1C1/ACADL/CYP4F12/AKR1C2/MLXIPL/DGAT2/GPD1
 
 ``` r
 #DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
@@ -1945,7 +2423,7 @@ egmt_subs[1:5,]
 dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=30, font.size = 8)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-42-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-49-1.png)<!-- -->
 
 ### Enrichment Plots
 
@@ -1956,7 +2434,7 @@ for(i in 1:5){
 }
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-43-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-43-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-43-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-43-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-43-5.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-50-1.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-50-2.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-50-3.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-50-4.png)<!-- -->![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-50-5.png)<!-- -->
 
 ### Batch correction
 
@@ -2006,7 +2484,7 @@ ggplot(pcaData, aes(x = PC1, y = PC2, color = Study, shape = Subpopulation)) +
   ggtitle("PCA with VST data")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-46-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-53-1.png)<!-- -->
 
 Next step is to look at batch correction.
 
@@ -2076,7 +2554,7 @@ mat <- limma::removeBatchEffect(mat, batch = vsd_remove_batch_tumor_juxta_subpop
 
     ## Coefficients not estimable: batch2 batch4
 
-    ## Warning: Partial NA coefficients for 22678 probe(s)
+    ## Warning: Partial NA coefficients for 17763 probe(s)
 
 ``` r
 assay(vsd_remove_batch_tumor_juxta_subpopulation) <- mat
@@ -2162,7 +2640,7 @@ ggplot(p$rotated, aes(x = PC1, y = PC2, color = p$metadata$Study, shape = p$meta
   ggtitle("PCA with transormed data after batch correction")
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-49-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-56-1.png)<!-- -->
 
 ``` r
 batch <- coldata$Study
@@ -2216,16 +2694,16 @@ tab
 
     ##     caf_test_category
     ## pr   S1 S3 S4
-    ##   S1  6  2  0
+    ##   S1  6  1  0
     ##   S3  0  0  0
-    ##   S4  0  0  1
+    ##   S4  0  0  2
 
 ``` r
 accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
  accuracy(tab)
 ```
 
-    ## [1] 77.77778
+    ## [1] 88.88889
 
 ``` r
   outputs <- c()
@@ -2242,7 +2720,7 @@ for (i in 1:50){
 plot(outputs)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-56-1.png)<!-- -->
+![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-63-1.png)<!-- -->
 
 ``` r
   prediction <- knn(mat_train,mat_unknown,cl=caf_target_category,k=13)
