@@ -1,7 +1,7 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-08-29 16:39:11
+2022-08-31 11:17:48
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#analysis" id="toc-analysis">Analysis</a>
@@ -236,15 +236,14 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
 #tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
 
 # tx2gene but using the hgnc symbol instead of ensembl gene id version
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+                host="uswest.ensembl.org")
 ```
 
-    ## Ensembl site unresponsive, trying useast mirror
-
-    ## Ensembl site unresponsive, trying uswest mirror
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
 
 ``` r
-                #host="uswest.ensembl.org")
 tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
 
 # salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
@@ -396,9 +395,10 @@ meanSdPlot(assay(ntd))
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/Mean%20variance%20relationship%20using%20log(x+1)%20transformation-1.png)<!-- -->
 
 ``` r
-# here, blind is FALSE as we don't want it to be blind to experimental design 
+# blind is FALSE when we don't want it to be blind to experimental design 
 # recommended when transforming data for downstream analysis which will use the design information
-vsd <- vst(dds, blind = FALSE)
+# blind TRUE is recommended when transforming for QA purposes
+vsd <- vst(dds, blind = TRUE)
 ```
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
@@ -950,8 +950,8 @@ annotate_de_genes <- function(df, filter_by){
     df$gene_symbol <- rownames(df)
     colnames(df)[6] <- filter_by_string
     #print(df)
-    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",  host="https://www.ensembl.org")
-                    #host="uswest.ensembl.org")
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",  #host="https://www.ensembl.org")
+                    host="uswest.ensembl.org")
     info <- getBM(attributes=c("hgnc_symbol",
                                "ensembl_gene_id_version",
                                "chromosome_name",
@@ -1125,14 +1125,24 @@ s1_filtered <- dfs_filtered[[1]]
 s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "hgnc_symbol")
 ```
 
-    ## Ensembl site unresponsive, trying uswest mirror
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
 
 ``` r
 s3_filtered <- dfs_filtered[[2]]
 s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "hgnc_symbol")
+```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
+
+``` r
 s4_filtered <- dfs_filtered[[3]]
 s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "hgnc_symbol")
 ```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
 
 #### Without inhouse data or study EGAD00001006144
 
@@ -1249,11 +1259,26 @@ dfs_filtered <- filter_dfs_antijoin_rownames(dfs_to_filter)
 names(dfs_filtered) <- c("S1", "S3", "S4")
 s1_filtered <- dfs_filtered[[1]]
 s1_filtered_annotations <- annotate_de_genes(s1_filtered, filter_by = "hgnc_symbol")
+```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
+
+``` r
 s3_filtered <- dfs_filtered[[2]]
 s3_filtered_annotations <- annotate_de_genes(s3_filtered, filter_by = "hgnc_symbol")
+```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
+
+``` r
 s4_filtered <- dfs_filtered[[3]]
 s4_filtered_annotations <- annotate_de_genes(s4_filtered, filter_by = "hgnc_symbol")
 ```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
 
 ``` r
 s1_gs <- s1_filtered_annotations$Gene
@@ -1266,13 +1291,8 @@ names(genesets) <- c("S1", "S3", "S4")
 ### Over-representation analysis
 
 ``` r
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="www.ensembl.org") #host = "https://uswest.ensembl.org")
-```
-
-    ## Warning: Ensembl will soon enforce the use of https.
-    ## Ensure the 'host' argument includes "https://"
-
-``` r
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://uswest.ensembl.org")
+                # host="www.ensembl.org")
 background_genes <- getBM(attributes = "entrezgene_id", 
                           #filters = "ensembl_gene_id_version", 
                           filters = "hgnc_symbol",

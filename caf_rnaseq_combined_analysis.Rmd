@@ -184,8 +184,8 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
 #tx2gene <- read_tsv("/home/kevin/Documents/PhD/references/tx2gene_gencode_v31.txt")
 
 # tx2gene but using the hgnc symbol instead of ensembl gene id version
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
-                #host="uswest.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+                host="uswest.ensembl.org")
 tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
 
 # salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
@@ -285,9 +285,10 @@ meanSdPlot(assay(ntd))
 ```
 
 ```{r Mean variance relationship using variance stabilising transformation}
-# here, blind is FALSE as we don't want it to be blind to experimental design 
+# blind is FALSE when we don't want it to be blind to experimental design 
 # recommended when transforming data for downstream analysis which will use the design information
-vsd <- vst(dds, blind = FALSE)
+# blind TRUE is recommended when transforming for QA purposes
+vsd <- vst(dds, blind = TRUE)
 meanSdPlot(assay(vsd))
 ```
 
@@ -720,8 +721,8 @@ annotate_de_genes <- function(df, filter_by){
     df$gene_symbol <- rownames(df)
     colnames(df)[6] <- filter_by_string
     #print(df)
-    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",  host="https://www.ensembl.org")
-                    #host="uswest.ensembl.org")
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl",  #host="https://www.ensembl.org")
+                    host="uswest.ensembl.org")
     info <- getBM(attributes=c("hgnc_symbol",
                                "ensembl_gene_id_version",
                                "chromosome_name",
@@ -964,8 +965,8 @@ names(genesets) <- c("S1", "S3", "S4")
 ### Over-representation analysis
 
 ```{r Extract background Entrez IDs}
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="www.ensembl.org") #host = "https://uswest.ensembl.org")
-                
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host = "https://uswest.ensembl.org")
+                # host="www.ensembl.org")
 background_genes <- getBM(attributes = "entrezgene_id", 
                           #filters = "ensembl_gene_id_version", 
                           filters = "hgnc_symbol",
