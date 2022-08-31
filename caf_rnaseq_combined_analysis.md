@@ -1,7 +1,7 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-08-31 11:17:48
+2022-08-31 14:38:01
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#analysis" id="toc-analysis">Analysis</a>
@@ -22,9 +22,6 @@ Kevin Ryan
     - <a href="#clinical-correlations-after-batch-correction"
       id="toc-clinical-correlations-after-batch-correction">Clinical
       Correlations after batch correction</a>
-    - <a href="#differential-expression-analysis-caf-vs-tan"
-      id="toc-differential-expression-analysis-caf-vs-tan">Differential
-      Expression Analysis CAF vs TAN</a>
     - <a href="#surrogate-variable-analysis"
       id="toc-surrogate-variable-analysis">Surrogate variable analysis</a>
     - <a
@@ -398,13 +395,13 @@ meanSdPlot(assay(ntd))
 # blind is FALSE when we don't want it to be blind to experimental design 
 # recommended when transforming data for downstream analysis which will use the design information
 # blind TRUE is recommended when transforming for QA purposes
-vsd <- vst(dds, blind = TRUE)
+vsd_no_batch_correction <- vst(dds, blind = TRUE)
 ```
 
     ## using 'avgTxLength' from assays(dds), correcting for library size
 
 ``` r
-meanSdPlot(assay(vsd))
+meanSdPlot(assay(vsd_no_batch_correction))
 ```
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/Mean%20variance%20relationship%20using%20variance%20stabilising%20transformation-1.png)<!-- -->
@@ -419,7 +416,7 @@ dds <- estimateSizeFactors(dds)
 df <- bind_rows(
   as_data_frame(log2(counts(dds, normalized=TRUE)[, 1:2]+1)) %>%
          mutate(transformation = "log2(x + 1)"),
-  as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"))
+  as_data_frame(assay(vsd_no_batch_correction)[, 1:2]) %>% mutate(transformation = "vst"))
 ```
 
     ## Warning: `as_data_frame()` was deprecated in tibble 2.0.0.
@@ -490,7 +487,7 @@ deseq_pca_studies <- function(dds_object){
 ```
 
 ``` r
-plotPCA(vsd, intgroup = c("Study", "Subpopulation"))
+plotPCA(vsd_no_batch_correction, intgroup = c("Study", "Subpopulation"))
 ```
 
 ![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
@@ -502,11 +499,11 @@ plotPCA(vsd, intgroup = c("Study", "Subpopulation"))
 PCA plots as per <https://github.com/kevinblighe/PCAtools>
 
 ``` r
-vsd_mat <- assay(vsd)
+vsd_mat_no_batch_correction <- assay(vsd_no_batch_correction)
 #keep <- rownames(vsd_mat)[!duplicated(rownames(vsd_mat))]
 #vsd_mat <- vsd_mat[keep,]
 metadata_pca <- metadata[,1:4]
-p <- pca(vsd_mat, metadata = metadata_pca)
+p <- pca(vsd_mat_no_batch_correction, metadata = metadata_pca)
 pscree <- screeplot(p, components = getComponents(p, 1:30),
     hline = 80, vline = 24, axisLabSize = 14, titleLabSize = 20,
     returnPlot = FALSE) +
@@ -772,12 +769,6 @@ peigencor <- eigencorplot(p,
 
 ![Merged panel of all PCAtools plots after batch
 correction](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-10-1.png)
-
-### Differential Expression Analysis CAF vs TAN
-
-``` r
-#dds <- DESeqDataSet(countData = round(adjusted_all/10), colData = metadata, design = ~ Study + Tumor_JuxtaTumor)
-```
 
 ### Surrogate variable analysis
 
@@ -1363,6 +1354,7 @@ geneSetOrder <- c("S4", "S3", "S1")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_subpopulation_caf_tan.png")
 heatmap(assay(caf_es)[geneSetOrder, sampleOrderBySubpopulation], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(subpopulationColorLegend[subpopulationOrder],
@@ -1373,14 +1365,17 @@ heatmap(assay(caf_es)[geneSetOrder, sampleOrderBySubpopulation], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.285,1.1, "CAF", col="red", cex=1.2)
-text(0.55,1.1, "TAN", col="green", cex=1.2)
-#text(0.47,1.21, "S4", col="blue", cex=1.2)
-mtext("Gene sets", side=4, line=0, cex=1.5)
+#text(0.285,1.1, "CAF", col="red", cex=1.2)
+#text(0.55,1.1, "TAN", col="green", cex=1.2)
+text(0.17,1.13, "CAF", col="red", cex=1.2)
+text(0.65,1.13, "TAN", col="green", cex=1.2)
+mtext("CAF subpopulation signature", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+dev.off()
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20heatmaps-1.png)<!-- -->
+    ## png 
+    ##   2
 
 ``` r
 subtypeOrder <- c("LuminalA", "TNBC")
@@ -1392,6 +1387,8 @@ geneSetOrder <- c("S4", "S3", "S1")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_cancer_subtype.png")
 heatmap(assay(caf_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(subtypeColorLegend[subtypeOrder],
@@ -1403,14 +1400,18 @@ heatmap(assay(caf_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.4,1.1, "LuminalA", col="red", cex=1.2)
-text(0.65,1.1, "TNBC", col="green", cex=1.2)
+#text(0.4,1.1, "LuminalA", col="red", cex=1.2)
+#text(0.65,1.1, "TNBC", col="green", cex=1.2)
+text(0.35,1.13, "LuminalA", col="red", cex=1.2)
+text(0.85,1.13, "TNBC", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
-mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("CAF subpopulation signature", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+dev.off()
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20heatmaps-2.png)<!-- -->
+    ## png 
+    ##   2
 
 ``` r
 gradeOrder <- c("Grade_2", "Grade_3")
@@ -1422,6 +1423,8 @@ geneSetOrder <- c("S4", "S3", "S1")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_cancer_grade.png")
 heatmap(assay(caf_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(gradeColorLegend[gradeOrder],
@@ -1433,14 +1436,18 @@ heatmap(assay(caf_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.34,1.1, "Grade 2", col="red", cex=1.2)
-text(0.6,1.1, "Grade 3", col="green", cex=1.2)
+#text(0.34,1.1, "Grade 2", col="red", cex=1.2)
+#text(0.6,1.1, "Grade 3", col="green", cex=1.2)
+text(0.25,1.13, "Grade 2", col="red", cex=1.2)
+text(0.74,1.13, "Grade 3", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
-mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("CAF subpopulation signature", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+dev.off()
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/Plot%20heatmaps-3.png)<!-- -->
+    ## png 
+    ##   2
 
 ``` r
 subtypeOrder <- c("LuminalA", "TNBC")
@@ -1466,7 +1473,7 @@ par(xpd=TRUE)
 text(0.4,1.1, "LuminalA", col="red", cex=1.2)
 text(0.65,1.1, "TNBC", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
-mtext("Gene sets", side=4, line=0, cex=1.5)
+mtext("CAF subpopulation signature", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
@@ -1781,7 +1788,7 @@ gene_signature_chemoresistance <- gene_signature_chemoresistance[!is.na(gene_sig
 gene_signature_chemosensitivity <- gene_signature_join$Suggested.Symbol[which(gene_signature_join$Regulation == "down")]
 gene_signature_chemosensitivity<- gene_signature_chemosensitivity[!is.na(gene_signature_chemosensitivity)]
 genesets_chemo <- list(gene_signature_chemoresistance, gene_signature_chemosensitivity)
-names(genesets_chemo) <- c("Chemoresistance", "Chemosensitive")
+names(genesets_chemo) <- c("Resist.", "Sensit.")
 ```
 
 ``` r
@@ -1813,32 +1820,32 @@ chemo_es$Histology <- inhouse_metadata$Histology
 assay(chemo_es)
 ```
 
-    ##                       4033       4034       4027       4028       4112
-    ## Chemoresistance  0.2511948  0.1835208 -0.2275412 -0.2921821 -0.1549386
-    ## Chemosensitive  -0.2884295 -0.2617528 -0.3135180 -0.4803626  0.3979869
-    ##                      4113       4116       4117      4214       4215      4315
-    ## Chemoresistance 0.2922223 -0.3305799 -0.3323113 0.1485889 -0.2558840 0.2260738
-    ## Chemosensitive  0.5291087 -0.6315582 -0.3175666 0.4718418  0.3953624 0.5808599
-    ##                      4316       4340       4341       4344       4345
-    ## Chemoresistance 0.2115296 -0.2499012  0.2918001 -0.3521381 -0.2333033
-    ## Chemosensitive  0.5089124 -0.3752032 -0.2284608 -0.3360215  0.2964242
-    ##                       3532      3533       3536      3537       4299      4300
-    ## Chemoresistance -0.3312907 0.3284542  0.2863740 0.2172434  0.4309208 0.2723313
-    ## Chemosensitive  -0.3923255 0.3729971 -0.2635225 0.3420735 -0.2614191 0.4182203
-    ##                       4722       4723
-    ## Chemoresistance -0.2989202 -0.2909116
-    ## Chemosensitive  -0.2995230 -0.2494366
+    ##               4033       4034       4027       4028       4112      4113
+    ## Resist.  0.2511948  0.1835208 -0.2275412 -0.2921821 -0.1549386 0.2922223
+    ## Sensit. -0.2884295 -0.2617528 -0.3135180 -0.4803626  0.3979869 0.5291087
+    ##               4116       4117      4214       4215      4315      4316
+    ## Resist. -0.3305799 -0.3323113 0.1485889 -0.2558840 0.2260738 0.2115296
+    ## Sensit. -0.6315582 -0.3175666 0.4718418  0.3953624 0.5808599 0.5089124
+    ##               4340       4341       4344       4345       3532      3533
+    ## Resist. -0.2499012  0.2918001 -0.3521381 -0.2333033 -0.3312907 0.3284542
+    ## Sensit. -0.3752032 -0.2284608 -0.3360215  0.2964242 -0.3923255 0.3729971
+    ##               3536      3537       4299      4300       4722       4723
+    ## Resist.  0.2863740 0.2172434  0.4309208 0.2723313 -0.2989202 -0.2909116
+    ## Sensit. -0.2635225 0.3420735 -0.2614191 0.4182203 -0.2995230 -0.2494366
 
 ``` r
+#rownames(assay(chemo_es)) <- c("Resistance", "Sensitive")
 subpopulationOrder <- c("tumor", "juxtatumor")
 sampleOrderBySubpopulation <- sort(match(chemo_es$Tumor_JuxtaTumor, subpopulationOrder),
                              index.return=TRUE)$ix
 subpopulationXtable <- table(chemo_es$Tumor_JuxtaTumor)
 subpopulationColorLegend <- c(tumor="red", juxtatumor="green")
-geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetOrder <- c("Resist.", "Sensit.")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_chemoresistance_caf_tan.png")
 heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubpopulation], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(subpopulationColorLegend[subpopulationOrder],
@@ -1849,14 +1856,18 @@ heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubpopulation], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.285,1.1, "CAF", col="red", cex=1.2)
-text(0.55,1.1, "TAN", col="green", cex=1.2)
+#text(0.285,1.1, "CAF", col="red", cex=1.2)
+#text(0.55,1.1, "TAN", col="green", cex=1.2)
+text(0.16,1.13, "CAF", col="red", cex=1.2)
+text(0.65,1.13, "TAN", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
 mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+dev.off()
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-1.png)<!-- -->
+    ## png 
+    ##   2
 
 ``` r
 subtypeOrder <- c("LuminalA", "TNBC")
@@ -1864,10 +1875,12 @@ sampleOrderBySubtype <- sort(match(chemo_es$Subtype, subtypeOrder),
                              index.return=TRUE)$ix
 subtypeXtable <- table(chemo_es$Subtype)
 subtypeColorLegend <- c(LuminalA="red", TNBC="green")
-geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetOrder <- c("Resist.", "Sensit.")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_chemoresistance_cancer_subtype.png")
 heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(subtypeColorLegend[subtypeOrder],
@@ -1879,14 +1892,18 @@ heatmap(assay(chemo_es)[geneSetOrder, sampleOrderBySubtype], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.4,1.1, "LuminalA", col="red", cex=1.2)
-text(0.65,1.1, "TNBC", col="green", cex=1.2)
+#text(0.4,1.1, "LuminalA", col="red", cex=1.2)
+#text(0.65,1.1, "TNBC", col="green", cex=1.2)
+text(0.35,1.13, "LuminalA", col="red", cex=1.2)
+text(0.85,1.13, "TNBC", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
 mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
+dev.off()
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-2.png)<!-- -->
+    ## png 
+    ##   2
 
 ``` r
 gradeOrder <- c("Grade_2", "Grade_3")
@@ -1894,10 +1911,12 @@ sampleOrderByGrade <- sort(match(chemo_es$Grade, gradeOrder),
                              index.return=TRUE)$ix
 gradeXtable <- table(chemo_es$Grade)
 gradeColorLegend <- c(Grade_2="red", Grade_3="green")
-geneSetOrder <- c("Chemoresistance", "Chemosensitive")
+geneSetOrder <- c("Resist.", "Sensit.")
 geneSetLabels <- geneSetOrder
 hmcol <- colorRampPalette(brewer.pal(10, "RdBu"))(256)
 hmcol <- hmcol[length(hmcol):1]
+
+png(filename = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/caf_rnaseq_combined_analysis_files/figure-gfm/gsva_chemoresistance_cancer_grade.png")
 heatmap(assay(chemo_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
         Colv=NA, scale="row", margins=c(3,5), col=hmcol,
         ColSideColors=rep(gradeColorLegend[gradeOrder],
@@ -1909,35 +1928,35 @@ heatmap(assay(chemo_es)[geneSetOrder, sampleOrderByGrade], Rowv=NA,
                      substring(geneSetLabels, 2), sep=""),
         cexRow=2, main=" \n ")
 par(xpd=TRUE)
-text(0.34,1.1, "Grade 2", col="red", cex=1.2)
-text(0.6,1.1, "Grade 3", col="green", cex=1.2)
+#text(0.34,1.1, "Grade 2", col="red", cex=1.2)
+#text(0.6,1.1, "Grade 3", col="green", cex=1.2)
+text(0.25,1.13, "Grade 2", col="red", cex=1.2)
+text(0.75,1.13, "Grade 3", col="green", cex=1.2)
 #text(0.47,1.21, "S4", col="blue", cex=1.2)
 mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](caf_rnaseq_combined_analysis_files/figure-gfm/unnamed-chunk-36-3.png)<!-- -->
-
 ``` r
 chemoresistance_ratio <- function(df){
   out <- data.frame(Patient = df$Patient,)
 }
-as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Chemoresistance)/abs(Chemosensitive))
+as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.))
 ```
 
     ## # A tibble: 24 × 4
-    ##    Chemoresistance Chemosensitive Patient Chemoresistance_ratio
-    ##              <dbl>          <dbl>   <int>                 <dbl>
-    ##  1           0.251         -0.288       1                 0.871
-    ##  2           0.184         -0.262       1                 0.701
-    ##  3          -0.228         -0.314       2                 0.726
-    ##  4          -0.292         -0.480       2                 0.608
-    ##  5          -0.155          0.398       3                 0.389
-    ##  6           0.292          0.529       3                 0.552
-    ##  7          -0.331         -0.632       4                 0.523
-    ##  8          -0.332         -0.318       4                 1.05 
-    ##  9           0.149          0.472       5                 0.315
-    ## 10          -0.256          0.395       5                 0.647
+    ##    Resist. Sensit. Patient Chemoresistance_ratio
+    ##      <dbl>   <dbl>   <int>                 <dbl>
+    ##  1   0.251  -0.288       1                 0.871
+    ##  2   0.184  -0.262       1                 0.701
+    ##  3  -0.228  -0.314       2                 0.726
+    ##  4  -0.292  -0.480       2                 0.608
+    ##  5  -0.155   0.398       3                 0.389
+    ##  6   0.292   0.529       3                 0.552
+    ##  7  -0.331  -0.632       4                 0.523
+    ##  8  -0.332  -0.318       4                 1.05 
+    ##  9   0.149   0.472       5                 0.315
+    ## 10  -0.256   0.395       5                 0.647
     ## # … with 14 more rows
     ## # ℹ Use `print(n = ...)` to see more rows
 
