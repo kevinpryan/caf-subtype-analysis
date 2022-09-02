@@ -244,7 +244,7 @@ plotPCA(vsd, intgroup = c("Study"))
 
 ### Clinical correlations all studies
 
-```{r}
+```{r, include = FALSE}
 vsd_mat <- assay(vsd)
 metadata_pca <- metadata[,1:4]
 p <- pca(vsd_mat, metadata = metadata_pca)
@@ -266,11 +266,16 @@ peigencor <- eigencorplot(p,
     main = 'PC1-10 clinical correlations',
     colFrame = 'white',
     plotRsquared = TRUE)
-peigencor
 ```
-### Clinical correlations without In-House data
 
 ```{r}
+peigencor
+```
+
+
+### Clinical correlations without In-House data
+
+```{r, include = FALSE}
 vsd_no_inhouse <- vst(dds_no_inhouse, blind = TRUE)
 vsd_mat_no_inhouse <- assay(vsd_no_inhouse)
 metadata_pca_no_inhouse <- colData(vsd_no_inhouse)[,1:5]
@@ -295,11 +300,15 @@ peigencor_no_inhouse <- eigencorplot(p,
     main = 'PC1-10 clinical correlations',
     colFrame = 'white',
     plotRsquared = TRUE)
+```
+```{r}
 peigencor_no_inhouse
 ```
+
+
 Here we can see strandedness (`EGAD00001006144`) is significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the variance of the entire dataset respectively).
 
-```{r}
+```{r, include=FALSE}
 ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
     triangle = TRUE, trianglelabSize = 12,
     hline = 0, vline = 0,
@@ -310,7 +319,10 @@ ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
     legendPosition = 'bottom',
     returnPlot = TRUE)
 ppairs
-ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/pairsplot_no_inhouse_col_strandedness.png", plot = ppairs)
+#ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/pairsplot_no_inhouse_col_strandedness.png", plot = ppairs)
+```
+```{r}
+ppairs
 ```
 
 
@@ -318,7 +330,7 @@ ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/
 
 Given the plot above, we can see that most of the variability of PC1 can be attributed to Study, indicating batch effects. Methods exist to "remove" batch effects, but they can not be run on our data. All of our S3 samples come from study `EGAD00001004810` and so when one tries to make a model matrix including both Study and Subpopulation, the model matrix is of less than full rank and there is an error. Let's look at the clinical correlations plot if we remove our outlier study `EGAD00001006144` as well as our in-house data.
 
-```{r Remove study EGAD00001006144}
+```{r Remove study EGAD00001006144, include=FALSE}
 idx <- which(se_no_inhouse$Study != "EGAD00001006144")
 se_no_inhouse_no_6144 <- se_no_inhouse[,idx]
 dds_no_inhouse_no_6144 <- DESeqDataSet(se_no_inhouse_no_6144, design = ~1)
@@ -333,7 +345,7 @@ dds_no_inhouse_no_6144 <- dds_no_inhouse_no_6144[keep,]
 vsd_no_inhouse_no_6144 <- vst(dds_no_inhouse_no_6144, blind = TRUE)
 ```
 
-```{r}
+```{r, include = FALSE}
 vsd_mat_reduced <- assay(vsd_no_inhouse_no_6144)
 metadata_pca_reduced <- colData(vsd_no_inhouse_no_6144)[,1:4]
 metadata_pca_reduced <- as.data.frame(metadata_pca_reduced[!names(metadata_pca_reduced) %in% c("names")])
@@ -357,6 +369,10 @@ peigencor_reduced <- eigencorplot(p,
     main = 'PC1-10 clinical correlations',
     colFrame = 'white',
     plotRsquared = TRUE)
+
+```
+
+```{r}
 peigencor_reduced
 ```
 
@@ -626,7 +642,7 @@ ggplot(mapping = aes(S4_ES)) +
   theme_linedraw()
 ```
 
-```{r}
+```{r, include = FALSE}
 top_row <- plot_grid(gsva_plot_s1, gsva_plot_s3, gsva_plot_s4,
       ncol = 3,
       labels = c('A', 'B', 'C'),
@@ -644,8 +660,10 @@ top_row <- plot_grid(gsva_plot_s1, gsva_plot_s3, gsva_plot_s4,
       label_size = 22,
       align = 'h',
       rel_widths = c(0.8, 1.2))
+```
 
-    plot_grid(top_row, bottom_row, nrow = 2,
+```{r}
+ plot_grid(top_row, bottom_row, nrow = 2,
       rel_heights = c(1.1, 0.9))
 ```
 
@@ -695,7 +713,7 @@ Su et al 2018 carried out differential expression analysis between chemoresistan
 
 The HGNCHelper package can be used to fix outdated gene symbols.
 
-```{r read in gene signatures}
+```{r read in gene signatures, include=FALSE}
 gene_signature <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/1-s2.0-S0092867418300448-mmc1.csv", skip = 1)
 gene_signature_loc <- gene_signature[str_detect(gene_signature$Gene.name, pattern = "^LOC\\d+$"),]
 # write to file and look up loc gene signatures manually, read back in as gene_signature_loc_official
@@ -723,7 +741,7 @@ genesets_chemo <- list(gene_signature_chemoresistance, gene_signature_chemosensi
 names(genesets_chemo) <- c("Resist.", "Sensit.")
 ```
 
-```{r GSVA for chemoresistance signatures}
+```{r GSVA for chemoresistance signatures, include=FALSE}
 chemo_es <- gsva(expr = dds_inhouse,
                gset.idx.list = genesets_chemo,
                method = "gsva",
@@ -835,7 +853,7 @@ mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 chemoresistance_ratio <- function(df){
   out <- data.frame(Patient = df$Patient,)
 }
-as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.))
+as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.)) %>% print(n = 24)
 ```
 
 ## Deconvolution using CIBERSORTx
@@ -862,7 +880,42 @@ The online version of CIBERSORTx was also used, using 500 permutations. The stud
 
 ```{r CIBERSORTx online results}
 cibersort_results_online <- read.csv("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/online/2022-09-01-CIBERSORTx_Job6_Results_online_no6144_hgnc.csv", header = T)
-cibersort_results_online
+cibersort_results_online 
+```
+
+```{r, include = FALSE}
+cibersort_results_long <- pivot_longer(cibersort_results, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long$Mixture <- as.character(cibersort_results_long$Mixture)
+cibersort_plot_docker <- ggplot(cibersort_results_long, aes(x = Mixture, y = value, fill = `Subpopulation`)) + 
+  geom_col() + 
+  ggtitle("Docker") + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r, include = FALSE}
+cibersort_results_long_online <- pivot_longer(cibersort_results_online, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
+cibersort_plot_online <- ggplot(cibersort_results_long_online, aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) + 
+  geom_col() + 
+  ggtitle("Online") +   
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r, include = FALSE}
+cibersort_grid <- plot_grid(cibersort_plot_online, cibersort_plot_docker,
+      ncol = 2,
+      labels = c('A', 'B'),
+      label_fontfamily = 'serif',
+      label_fontface = 'bold',
+      label_size = 15,
+      align = 'h')
+ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/cibersort_plot.png", plot = cibersort_grid)
+```
+
+```{r CIBERSORT plots}
+cibersort_grid
 ```
 
 Using the deconvolution approach with CIBERSORTx, there seems to be none of the S3 subpopulation present. It is possible that the S3 subpopulation does not have a very well defined transcriptional profile. 

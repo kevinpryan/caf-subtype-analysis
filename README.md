@@ -1,7 +1,7 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-09-02 17:51:15
+2022-09-02 18:25:06
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -12,6 +12,9 @@ Kevin Ryan
     - <a href="#clinical-correlations-all-studies"
       id="toc-clinical-correlations-all-studies">Clinical correlations all
       studies</a>
+    - <a href="#clinical-correlations-without-in-house-data"
+      id="toc-clinical-correlations-without-in-house-data">Clinical
+      correlations without In-House data</a>
     - <a href="#removal-of-study-egad00001006144"
       id="toc-removal-of-study-egad00001006144">Removal of study
       EGAD00001006144</a>
@@ -272,142 +275,28 @@ plotPCA(vsd, intgroup = c("Study"))
 ### Clinical correlations all studies
 
 ``` r
-vsd_mat <- assay(vsd)
-metadata_pca <- metadata[,1:4]
-p <- pca(vsd_mat, metadata = metadata_pca)
-peigencor <- eigencorplot(p,
-    components = getComponents(p, 1:10),
-    metavars = colnames(metadata_pca),
-    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
-    cexCorval = 0.7,
-    colCorval = 'black',
-    fontCorval = 2,
-    posLab = 'bottomleft',
-    rotLabX = 45,
-    posColKey = 'top',
-    cexLabColKey = 1.5,
-    scale = TRUE,
-    corFUN = 'pearson',
-    corUSE = 'pairwise.complete.obs',
-    corMultipleTestCorrection = 'none',
-    main = 'PC1-10 clinical correlations',
-    colFrame = 'white',
-    plotRsquared = TRUE)
-```
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca), : Study is not numeric - please check the source data as
-    ## non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca), : Subpopulation is not numeric - please check the source
-    ## data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca), : Tumor_JuxtaTumor is not numeric - please check the
-    ## source data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca), : Strandedness is not numeric - please check the source
-    ## data as non-numeric variables will be coerced to numeric
-
-``` r
 peigencor
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-2-1.png)<!-- --> \### Clinical
-correlations without In-House data
+![](README_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
-``` r
-vsd_no_inhouse <- vst(dds_no_inhouse, blind = TRUE)
-```
-
-    ## using 'avgTxLength' from assays(dds), correcting for library size
-
-``` r
-vsd_mat_no_inhouse <- assay(vsd_no_inhouse)
-metadata_pca_no_inhouse <- colData(vsd_no_inhouse)[,1:5]
-metadata_pca_no_inhouse <- as.data.frame(metadata_pca_no_inhouse[!names(metadata_pca_no_inhouse) %in% c("names")])
-p <- pca(vsd_mat_no_inhouse, metadata = metadata_pca_no_inhouse)
-peigencor_no_inhouse <- eigencorplot(p,
-    components = getComponents(p, 1:10),
-    metavars = colnames(metadata_pca_no_inhouse),
-    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
-    cexCorval = 0.7,
-    colCorval = 'black',
-    fontCorval = 2,
-    posLab = 'bottomleft',
-    rotLabX = 45,
-    posColKey = 'top',
-    cexLabColKey = 1.5,
-    scale = TRUE,
-    corFUN = 'pearson',
-    #corUSE = 'pairwise.complete.obs',
-    corUSE = 'pairwise.complete.obs',
-    corMultipleTestCorrection = 'none',
-    main = 'PC1-10 clinical correlations',
-    colFrame = 'white',
-    plotRsquared = TRUE)
-```
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_no_inhouse), : Study is not numeric - please check the
-    ## source data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_no_inhouse), : Subpopulation is not numeric - please check
-    ## the source data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_no_inhouse), : Tumor_JuxtaTumor is not numeric - please
-    ## check the source data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_no_inhouse), : Strandedness is not numeric - please check
-    ## the source data as non-numeric variables will be coerced to numeric
+### Clinical correlations without In-House data
 
 ``` r
 peigencor_no_inhouse
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-3-1.png)<!-- --> Here we can
-see strandedness (`EGAD00001006144`) is significantly correlated with
-PCs 1-3. These PCs explain 28%, 8% and 4% of the variance of the entire
-dataset respectively).
+![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
-``` r
-ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
-    triangle = TRUE, trianglelabSize = 12,
-    hline = 0, vline = 0,
-    pointSize = 0.8, gridlines.major = FALSE, gridlines.minor = FALSE,
-    colby = 'Strandedness',
-    title = '', plotaxes = FALSE,
-    margingaps = unit(c(0.01, 0.01, 0.01, 0.01), 'cm'),
-    legendPosition = 'bottom',
-    returnPlot = TRUE)
-```
-
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
-    ## Coordinate system already present. Adding new coordinate system, which will replace the existing one.
+Here we can see strandedness (`EGAD00001006144`) is significantly
+correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the
+variance of the entire dataset respectively).
 
 ``` r
 ppairs
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
-
-``` r
-ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/pairsplot_no_inhouse_col_strandedness.png", plot = ppairs)
-```
-
-    ## Saving 7 x 5 in image
+![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ### Removal of study EGAD00001006144
 
@@ -421,70 +310,10 @@ the clinical correlations plot if we remove our outlier study
 `EGAD00001006144` as well as our in-house data.
 
 ``` r
-idx <- which(se_no_inhouse$Study != "EGAD00001006144")
-se_no_inhouse_no_6144 <- se_no_inhouse[,idx]
-dds_no_inhouse_no_6144 <- DESeqDataSet(se_no_inhouse_no_6144, design = ~1)
-```
-
-    ## using counts and average transcript lengths from tximeta
-
-``` r
-# returns a vector of whether the total count of each gene is >= 10 (True or false)
-keep <- rowSums(counts(dds_no_inhouse_no_6144)) >= 10
-# only keep rows (genes) for which keep is TRUE
-dds_no_inhouse_no_6144 <- dds_no_inhouse_no_6144[keep,]
-# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
-X <- 7
-keep <- rowSums(counts(dds_no_inhouse_no_6144) >= 10) >= X
-dds_no_inhouse_no_6144 <- dds_no_inhouse_no_6144[keep,]
-vsd_no_inhouse_no_6144 <- vst(dds_no_inhouse_no_6144, blind = TRUE)
-```
-
-    ## using 'avgTxLength' from assays(dds), correcting for library size
-
-``` r
-vsd_mat_reduced <- assay(vsd_no_inhouse_no_6144)
-metadata_pca_reduced <- colData(vsd_no_inhouse_no_6144)[,1:4]
-metadata_pca_reduced <- as.data.frame(metadata_pca_reduced[!names(metadata_pca_reduced) %in% c("names")])
-p <- pca(vsd_mat_reduced, metadata = metadata_pca_reduced)
-peigencor_reduced <- eigencorplot(p,
-    components = getComponents(p, 1:10),
-    metavars = colnames(metadata_pca_reduced),
-    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
-    cexCorval = 0.7,
-    colCorval = 'black',
-    fontCorval = 2,
-    posLab = 'bottomleft',
-    rotLabX = 45,
-    posColKey = 'top',
-    cexLabColKey = 1.5,
-    scale = TRUE,
-    corFUN = 'pearson',
-    #corUSE = 'pairwise.complete.obs',
-    corUSE = 'pairwise.complete.obs',
-    corMultipleTestCorrection = 'none',
-    main = 'PC1-10 clinical correlations',
-    colFrame = 'white',
-    plotRsquared = TRUE)
-```
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_reduced), : Study is not numeric - please check the source
-    ## data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_reduced), : Subpopulation is not numeric - please check
-    ## the source data as non-numeric variables will be coerced to numeric
-
-    ## Warning in eigencorplot(p, components = getComponents(p, 1:10), metavars =
-    ## colnames(metadata_pca_reduced), : Tumor_JuxtaTumor is not numeric - please check
-    ## the source data as non-numeric variables will be coerced to numeric
-
-``` r
 peigencor_reduced
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ## Surrogate variable analysis
 
@@ -855,29 +684,11 @@ ggplot(mapping = aes(S4_ES)) +
 ```
 
 ``` r
-top_row <- plot_grid(gsva_plot_s1, gsva_plot_s3, gsva_plot_s4,
-      ncol = 3,
-      labels = c('A', 'B', 'C'),
-      label_fontfamily = 'serif',
-      label_fontface = 'bold',
-      label_size = 15,
-      align = 'h',
-      rel_widths = c(1.10, 0.80, 1.10))
-
-    bottom_row <- plot_grid(distribution_es_s1, distribution_es_s3, distribution_es_s4,
-      ncol = 3,
-      labels = c('D', 'E', 'F'),
-      label_fontfamily = 'serif',
-      label_fontface = 'bold',
-      label_size = 22,
-      align = 'h',
-      rel_widths = c(0.8, 1.2))
-
-    plot_grid(top_row, bottom_row, nrow = 2,
+ plot_grid(top_row, bottom_row, nrow = 2,
       rel_heights = c(1.1, 0.9))
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ``` r
 df_plot_S1$S1_ES %>% 
@@ -1055,71 +866,6 @@ chemoresistant cells as our marker of chemosensitivity.
 The HGNCHelper package can be used to fix outdated gene symbols.
 
 ``` r
-gene_signature <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/1-s2.0-S0092867418300448-mmc1.csv", skip = 1)
-gene_signature_loc <- gene_signature[str_detect(gene_signature$Gene.name, pattern = "^LOC\\d+$"),]
-# write to file and look up loc gene signatures manually, read back in as gene_signature_loc_official
-#write.table(gene_signature_loc, file = "/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc.txt", quote = F, row.names = F)
-gene_signature_loc_official <- read.table("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc_official_names.txt", header = T)
-gene_signature_proper_names <- gene_signature
-gene_signature_proper_names$Official_name <- gene_signature$Gene.name
-idx <- match(gene_signature_loc$Gene.name, gene_signature$Gene.name)
-gene_signature_proper_names[idx,]$Official_name <- gene_signature_loc_official$Official_symbol
-gene_signature_proper_names <- drop_na(gene_signature_proper_names)
-row_remove <- which(gene_signature_proper_names$Gene.name == "N/A")
-gene_signature_proper_names <- gene_signature_proper_names[-c(row_remove),]
-gene_signature_hgnc <- checkGeneSymbols(gene_signature_proper_names$Official_name, species = "human")
-```
-
-    ## Maps last updated on: Thu Oct 24 12:31:05 2019
-
-    ## Warning in checkGeneSymbols(gene_signature_proper_names$Official_name, species
-    ## = "human"): Human gene symbols should be all upper-case except for the 'orf' in
-    ## open reading frames. The case of some letters was corrected.
-
-    ## Warning in checkGeneSymbols(gene_signature_proper_names$Official_name, species =
-    ## "human"): x contains non-approved gene symbols
-
-``` r
-gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "CCRL1")] <- NA
-gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "FLJ40504")] <- NA
-gene_signature_hgnc$Suggested.Symbol[which(gene_signature_hgnc$x == "LETR1")] <- "LETR1"
-gene_signature_hgnc <- drop_na(gene_signature_hgnc)
-colnames(gene_signature_hgnc) <- c("Gene.name", "Approved", "Suggested.Symbol")
-gene_signature_join <- full_join(gene_signature, gene_signature_hgnc, by = "Gene.name")
-gene_signature_chemoresistance <- gene_signature_join$Suggested.Symbol[which(gene_signature_join$Regulation == "up")]
-gene_signature_chemoresistance <- gene_signature_chemoresistance[!is.na(gene_signature_chemoresistance)]
-gene_signature_chemosensitivity <- gene_signature_join$Suggested.Symbol[which(gene_signature_join$Regulation == "down")]
-gene_signature_chemosensitivity<- gene_signature_chemosensitivity[!is.na(gene_signature_chemosensitivity)]
-genesets_chemo <- list(gene_signature_chemoresistance, gene_signature_chemosensitivity)
-names(genesets_chemo) <- c("Resist.", "Sensit.")
-```
-
-``` r
-chemo_es <- gsva(expr = dds_inhouse,
-               gset.idx.list = genesets_chemo,
-               method = "gsva",
-               kcdf = "Poisson",
-               mx.diff=FALSE)
-```
-
-    ## Warning in .filterFeatures(expr, method): 247 genes with constant expression
-    ## values throuhgout the samples.
-
-    ## Warning in .filterFeatures(expr, method): Since argument method!="ssgsea", genes
-    ## with constant expression values are discarded.
-
-    ## Estimating GSVA scores for 2 gene sets.
-    ## Estimating ECDFs with Poisson kernels
-    ##   |                                                                              |                                                                      |   0%  |                                                                              |===================================                                   |  50%  |                                                                              |======================================================================| 100%
-
-``` r
-chemo_es$Patient <- inhouse_metadata$Patient
-chemo_es$Subtype <- inhouse_metadata$Subtype
-chemo_es$Grade <- inhouse_metadata$Grade
-chemo_es$Histology <- inhouse_metadata$Histology
-```
-
-``` r
 assay(chemo_es)
 ```
 
@@ -1167,7 +913,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1202,7 +948,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-17-2.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-22-2.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1237,7 +983,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-17-3.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-22-3.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1247,7 +993,7 @@ mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 chemoresistance_ratio <- function(df){
   out <- data.frame(Patient = df$Patient,)
 }
-as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.))
+as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.)) %>% print(n = 24)
 ```
 
     ## # A tibble: 24 × 4
@@ -1263,8 +1009,20 @@ as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Ch
     ##  8  -0.332  -0.318       4                 1.05 
     ##  9   0.149   0.472       5                 0.315
     ## 10  -0.256   0.395       5                 0.647
-    ## # … with 14 more rows
-    ## # ℹ Use `print(n = ...)` to see more rows
+    ## 11   0.226   0.581       6                 0.389
+    ## 12   0.212   0.509       6                 0.416
+    ## 13  -0.250  -0.375       7                 0.666
+    ## 14   0.292  -0.228       7                 1.28 
+    ## 15  -0.352  -0.336       8                 1.05 
+    ## 16  -0.233   0.296       8                 0.787
+    ## 17  -0.331  -0.392       9                 0.844
+    ## 18   0.328   0.373       9                 0.881
+    ## 19   0.286  -0.264      10                 1.09 
+    ## 20   0.217   0.342      10                 0.635
+    ## 21   0.431  -0.261      11                 1.65 
+    ## 22   0.272   0.418      11                 0.651
+    ## 23  -0.299  -0.300      12                 0.998
+    ## 24  -0.291  -0.249      12                 1.17
 
 ## Deconvolution using CIBERSORTx
 
@@ -1328,7 +1086,7 @@ to its probable outlier status.
 
 ``` r
 cibersort_results_online <- read.csv("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/online/2022-09-01-CIBERSORTx_Job6_Results_online_no6144_hgnc.csv", header = T)
-cibersort_results_online
+cibersort_results_online 
 ```
 
     ##    Mixture        S1 S3         S4 P.value Correlation      RMSE
@@ -1356,6 +1114,12 @@ cibersort_results_online
     ## 22    4300 0.9472909  0 0.05270908       0   0.6613853 1.1431199
     ## 23    4722 0.6837608  0 0.31623923       0   0.5446944 1.0181402
     ## 24    4723 0.9100635  0 0.08993653       0   0.5722794 1.2120169
+
+``` r
+cibersort_grid
+```
+
+![](README_files/figure-gfm/CIBERSORT%20plots-1.png)<!-- -->
 
 Using the deconvolution approach with CIBERSORTx, there seems to be none
 of the S3 subpopulation present. It is possible that the S3
