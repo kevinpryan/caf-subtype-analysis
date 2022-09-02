@@ -2099,10 +2099,19 @@ The files for CIBERSORT (mixture file, reference data and phenotype classes file
 docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src/data -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles:/src/outdir cibersortx/fractions --username k.ryan45@nuigalway.ie --token b7f03b943ade9b4146dc2126b4ac9d19 --single_cell FALSE --refsample caf_subtypes_tpm_for_sig_matrix.txt --mixture caf_tpm_mixture.txt --rmbatchBmode TRUE --outdir /home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles --phenoclasses /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles/phenoclasses_caf.txt
 ```
 
-```{r CIBERSORT initial results}
+```{r CIBERSORT initial results Docker}
 cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
 cibersort_results
 ```
+
+The online version of CIBERSORTx was also used, using 500 permutations. The study `EGAD00001006144` was excluded from the signature matrix due to its probable outlier status.
+
+```{r CIBERSORTx online results}
+cibersort_results_online <- read.csv("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/online/2022-09-01-CIBERSORTx_Job6_Results_online_no6144_hgnc.csv", header = T)
+cibersort_results_online
+```
+
+Using the deconvolution approach with CIBERSORTx, there seems to be none of the S3 subpopulation present. It is possible that the S3 subpopulation does not have a very well defined transcriptional profile. 
 
 Results look strange with P-value of 9999. CIBERSORTx was run using the Docker image and using the GUI, and different results were obtained. When the Docker image was used and the number of permutations was changed from 0 to 100, the p-value changed to 0.000. The proportions look different between the two methods, with the GUI predicting about 0.75 S1 with the rest being S4 for most samples.
 
