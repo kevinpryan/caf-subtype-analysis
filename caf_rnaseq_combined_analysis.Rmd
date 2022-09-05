@@ -963,6 +963,24 @@ genesets <- list(s1_gs, s3_gs, s4_gs)
 names(genesets) <- c("S1", "S3", "S4")
 ```
 
+
+```{r Compare to Kieffer et al gene signatures}
+library(data.table)
+library(HGNChelper)
+kieffer_2020_normal <- fread("/home/kevin/Documents/PhD/CAF_data/study_details/Costa2018/signatures.txt", select = c("Normal Fibroblast"))
+kieffer_s1 <- fread("/home/kevin/Documents/PhD/CAF_data/study_details/Costa2018/signatures.txt", select = c("CAF-S1"))
+kieffer_s1 <- kieffer_s1[-c(which(kieffer_s1$`CAF-S1` == "")),]$`CAF-S1`
+kieffer_normal_corrected <- checkGeneSymbols(kieffer_2020_normal$`Normal Fibroblast`, species = "human")$Suggested.Symbol
+kieffer_s1_corrected <- checkGeneSymbols(kieffer_s1$`CAF-S1`, species = 'human')$Suggested.Symbol
+checkGeneSymbols(kieffer_s1$`CAF-S1`, species = 'human')
+kieffer_s1_suggested <- checkGeneSymbols(kieffer_s1, species = 'human')$Suggested.Symbol
+kieffer_s1_corrected <- kieffer_s1_suggested[!is.na(kieffer_s1_suggested)]
+is.na(checkGeneSymbols(kieffer_s1, species = 'human')$Suggested.Symbol)
+intersect(kieffer_normal_corrected, s3_gs)
+intersect(kieffer_s1_corrected, s1_gs)
+outersect(kieffer_s1_corrected, s1_gs)
+```
+
 ### Over-representation analysis
 
 ```{r Extract background Entrez IDs}
@@ -1292,6 +1310,41 @@ We can see from the above that there is a difference between the enrichment scor
 results_combined <- cbind.data.frame(colData(caf_es)$names, colData(caf_es)$Patient, df_plot_S1$S1_ES, df_plot_S3$S3_ES, df_plot_S4$S4_ES, df_plot_S1$Tumor_JuxtaTumor, colData(caf_es)$Subtype, colData(caf_es)$Grade, colData(caf_es)$Histology)
 colnames(results_combined) <- c("Sample", "Patient", "S1_ES", "S3_ES", "S4_ES", "Tumor_JuxtaTumor", "Subtype", "Grade", "Histology")
 results_combined
+```
+
+
+### logCPM normalisation for GSVA
+
+```{r}
+library(edgeR)
+y <- DGEList(counts = assay(dds_inhouse))
+logCPM <- cpm(y, log = TRUE)
+
+caf_es_cpm <- gsva(expr = logCPM,
+               gset.idx.list = genesets,
+               method = "gsva",
+               kcdf = "Gaussian",
+               mx.diff=FALSE)
+```
+
+```{r}
+caf_es_cpm
+assay(caf_es)
+```
+
+### GSVA Kieffer et al gene signatures
+
+```{r GSVA for Kieffer et al signatures}
+kieffer_sigs <- list(S1_Kieffer = kieffer_s1_corrected, Normal_Kieffer = kieffer_normal_corrected)
+kieffer_es <- gsva(expr = dds_inhouse,
+               gset.idx.list = genesets_chemo,
+               method = "gsva",
+               kcdf = "Poisson",
+               mx.diff=FALSE)
+chemo_es$Patient <- inhouse_metadata$Patient
+chemo_es$Subtype <- inhouse_metadata$Subtype
+chemo_es$Grade <- inhouse_metadata$Grade
+chemo_es$Histology <- inhouse_metadata$Histology
 ```
 
 ### Chemoresistance gene signature
@@ -1816,6 +1869,7 @@ egmt_subs[1:5,]
 #DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
 ```
 
+
 ### Dot Plot
 
 ```{R, message=F, warning=F, fig.height=10, fig.width=12}
@@ -2083,6 +2137,7 @@ prediction
 
 They are all predicted to be S1 using this initial application of the algorithm except one sample.
 Possibly use interquartile range to improve performance?
+
 
 ## Deconvolution using CIBERSORTx
 

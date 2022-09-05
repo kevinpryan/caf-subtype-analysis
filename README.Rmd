@@ -24,7 +24,7 @@ Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the 
 
 [@Pelon2020]
 
-FACS gating strategies can be used to isolate these various subpopulations. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated scRNA-sequencing data for the S1 subpopulation. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
+FACS gating strategies can be used to isolate these subpopulations. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated scRNA-sequencing data for the S1 subpopulation. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
 
 The following summarises the data obtained:
 
@@ -49,7 +49,7 @@ With the juxta-tumour data, tumour and juxta-tumour samples came from the same p
 
 We also have scRNA-seq data for S1, labelled with 8 subpopulations of S1 CAFs. It may be possible to use CIBERSORT [@Newman2015] and BayesPrism [@Chu2022] to deconvolve the bulk S1 RNA-sequencing data to further confirm the presence of these subpopulations.
 
-It is likely that sorting the cells using FACS alters the transcriptional properties of the cells compared to if they are separated using spreading approaches, as is seen in study `EGAD00001006144` and described in. This is something that we will have to keep in mind.
+It is likely that sorting the cells using FACS alters the transcriptional properties of the cells compared to if they are separated using spreading approaches, as is seen in study `EGAD00001006144` and described in [@Kieffer2020]. This is something that we will have to keep in mind.
 
 The data was processed using nf-core/rnaseq version `3.8.1` using the default parameters. STAR/Salmon were used for alignment/quantification.
 
@@ -169,10 +169,11 @@ metadata_no_inhouse$Tumor_JuxtaTumor <- gsub(x = metadata_no_inhouse$Tumor_Juxta
 metadata_no_inhouse_no6144 <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, EGAD_5744_meta)
 ```
 
-## Read in data
+# Read in data
 
-Samples were processed with nf-core/rnaseq version `3.8.1`
-Salmon was used in alignment mode so there is no salmon index, so there is no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
+Samples were processed with nf-core/rnaseq version `3.8.1`.
+
+Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
 
 ```{r Prepare to read in data, include = FALSE}
 files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
@@ -233,16 +234,16 @@ keep <- rowSums(counts(dds_no_inhouse) >= 10) >= X
 dds_no_inhouse <- dds_no_inhouse[keep,]
 ```
 
-## Exploratory data analysis
+# Exploratory data analysis
 
-### PCA
+## PCA
 
 ```{r}
 plotPCA(vsd, intgroup = c("Subpopulation"))
 plotPCA(vsd, intgroup = c("Study"))
 ```
 
-### Clinical correlations all studies
+## Clinical correlations all studies
 
 ```{r, include = FALSE}
 vsd_mat <- assay(vsd)
@@ -273,7 +274,7 @@ peigencor
 ```
 
 
-### Clinical correlations without In-House data
+## Clinical correlations without In-House data
 
 ```{r, include = FALSE}
 vsd_no_inhouse <- vst(dds_no_inhouse, blind = TRUE)
@@ -297,7 +298,7 @@ peigencor_no_inhouse <- eigencorplot(p,
     #corUSE = 'pairwise.complete.obs',
     corUSE = 'pairwise.complete.obs',
     corMultipleTestCorrection = 'none',
-    main = 'PC1-10 clinical correlations',
+    main = 'PC1-10 clinical correlations without In-House',
     colFrame = 'white',
     plotRsquared = TRUE)
 ```
@@ -306,7 +307,7 @@ peigencor_no_inhouse
 ```
 
 
-Here we can see strandedness (`EGAD00001006144`) is significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the variance of the entire dataset respectively).
+Here we can see strandedness (i.e. the study `EGAD00001006144`) is significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the variance of the entire dataset respectively).
 
 ```{r, include=FALSE}
 ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
@@ -318,15 +319,15 @@ ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
     margingaps = unit(c(0.01, 0.01, 0.01, 0.01), 'cm'),
     legendPosition = 'bottom',
     returnPlot = TRUE)
-ppairs
 #ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/pairsplot_no_inhouse_col_strandedness.png", plot = ppairs)
 ```
+
 ```{r}
 ppairs
 ```
 
 
-### Removal of study EGAD00001006144
+## Removal of study EGAD00001006144
 
 Given the plot above, we can see that most of the variability of PC1 can be attributed to Study, indicating batch effects. Methods exist to "remove" batch effects, but they can not be run on our data. All of our S3 samples come from study `EGAD00001004810` and so when one tries to make a model matrix including both Study and Subpopulation, the model matrix is of less than full rank and there is an error. Let's look at the clinical correlations plot if we remove our outlier study `EGAD00001006144` as well as our in-house data.
 
@@ -366,7 +367,7 @@ peigencor_reduced <- eigencorplot(p,
     #corUSE = 'pairwise.complete.obs',
     corUSE = 'pairwise.complete.obs',
     corMultipleTestCorrection = 'none',
-    main = 'PC1-10 clinical correlations',
+    main = 'PC1-10 clinical correlations remove outlier',
     colFrame = 'white',
     plotRsquared = TRUE)
 
@@ -376,7 +377,42 @@ peigencor_reduced <- eigencorplot(p,
 peigencor_reduced
 ```
 
-## Surrogate variable analysis
+```{r pairs plot without EGAD00001006144 colour by study, include = FALSE}
+ppairs_no_6144 <- pairsplot(p, components = getComponents(p, c(1:3)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.8, gridlines.major = FALSE, gridlines.minor = FALSE,
+    #colby = 'Strandedness',
+    colby = 'Study',
+    title = '', plotaxes = FALSE,
+    margingaps = unit(c(0.01, 0.01, 0.01, 0.01), 'cm'),
+    legendPosition = 'bottom',
+    returnPlot = TRUE)
+```
+
+```{r}
+ppairs_no_6144
+```
+
+```{r pairs plot without EGAD00001006144, include = FALSE}
+ppairs_no_6144_colour_subpop <- pairsplot(p, components = getComponents(p, c(1:3)),
+    triangle = TRUE, trianglelabSize = 12,
+    hline = 0, vline = 0,
+    pointSize = 0.8, gridlines.major = FALSE, gridlines.minor = FALSE,
+    #colby = 'Strandedness',
+    colby = 'Subpopulation',
+    title = '', plotaxes = FALSE,
+    margingaps = unit(c(0.01, 0.01, 0.01, 0.01), 'cm'),
+    legendPosition = 'bottom',
+    returnPlot = TRUE)
+```
+
+```{r}
+ppairs_no_6144_colour_subpop
+```
+
+
+# Surrogate variable analysis
 
 ```{r}
 dds_no_inhouse_no_6144 <- DESeq(dds_no_inhouse_no_6144)
@@ -397,7 +433,7 @@ colData(dds_no_inhouse_no_6144)[,"Subpopulation"] <- as.factor(colData(dds_no_in
 colData(dds_no_inhouse_no_6144)[,"Tumor_JuxtaTumor"] <- as.factor(colData(dds_no_inhouse_no_6144)$Tumor_JuxtaTumor)
 ```
 
-## Differential expression analysis
+# Differential expression analysis
 
 ```{r}
 # add surrogate variables to design DDS object
@@ -697,6 +733,8 @@ median(df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"])
 median(df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"])
 median(df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"])
 median(df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"])
+median(df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"])
+median(df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"])
 ```
 
 We can see from the above that there is a difference between the enrichment scores for the gene signatures for the S1 and S3 subpopulaions between CAF and TAN. We can suggest that the TAN (juxta-tumour) samples are enriched for our S1 and S3 gene signatures compared to the genes outside the gene signatures, and that this enrichment is greater in the TAN samples than in the CAF samples.
@@ -707,9 +745,9 @@ colnames(results_combined) <- c("Sample", "Patient", "S1_ES", "S3_ES", "S4_ES", 
 results_combined
 ```
 
-## Chemoresistance gene signature
+# Chemoresistance gene signature
 
-Su et al 2018 carried out differential expression analysis between chemoresistant and chemosensitive CAFs from breast cancer. It is possible to try and identify the resulting signature in our samples. We will use the list of upregulated genes in chemoresistant samples as our marker of chemoresistance and the genes downregulated in the chemoresistant cells as our marker of chemosensitivity.
+[@Su2018] carried out differential expression analysis between chemoresistant and chemosensitive CAFs from breast cancer. It is possible to try and identify the resulting signature in our samples. We will use the list of upregulated genes in chemoresistant samples as our marker of chemoresistance and the genes downregulated in the chemoresistant cells as our marker of chemosensitivity.
 
 The HGNCHelper package can be used to fix outdated gene symbols.
 
@@ -856,7 +894,19 @@ chemoresistance_ratio <- function(df){
 as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Chemoresistance_ratio = abs(Resist.)/abs(Sensit.)) %>% print(n = 24)
 ```
 
-## Deconvolution using CIBERSORTx
+```{r}
+wilcox.test(x = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+wilcox.test(x = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+wilcox.test(x = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+# Deconvolution using CIBERSORTx
 
 CIBERSORTx [@Newman2019] is the most commonly used tool for cell-type deconvolution. It is a machine learning method which carries out batch correction, correcting for between-platform differences in expression data. In this case, the signature matrix was made using all of the available CAF subpopulation data (40 S1 samples, 25 S3 samples, 24 S4 samples). It is possible to infer the proportions of the different subpopulations as well as a subpopulation-specific gene expression matrix for each sample. Either scRNA-seq, bulk RNA-seq or microarray data can be used as the reference.
 
@@ -889,29 +939,52 @@ cibersort_results_long$Mixture <- as.character(cibersort_results_long$Mixture)
 cibersort_plot_docker <- ggplot(cibersort_results_long, aes(x = Mixture, y = value, fill = `Subpopulation`)) + 
   geom_col() + 
   ggtitle("Docker") + 
-  theme(plot.title = element_text(hjust = 0.5))
-
+  theme(plot.title = element_text(hjust = 0.5), axis.text = element_text(size = 4, angle = 90))+ 
+  xlab("Mixture") + 
+  ylab("Proportion")
+cibersort_plot_docker
 ```
 
 ```{r, include = FALSE}
 cibersort_results_long_online <- pivot_longer(cibersort_results_online, cols = c(S1, S3, S4), names_to = "Subpopulation")
 cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
-cibersort_plot_online <- ggplot(cibersort_results_long_online, aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) + 
+cibersort_plot_online <- ggplot(cibersort_results_long_online, 
+                                aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) +
   geom_col() + 
   ggtitle("Online") +   
-  theme(plot.title = element_text(hjust = 0.5))
+  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 4, angle = 90)) +
+  xlab("Mixture") + 
+  ylab("Proportion")
 
 ```
 
 ```{r, include = FALSE}
-cibersort_grid <- plot_grid(cibersort_plot_online, cibersort_plot_docker,
-      ncol = 2,
+legend <- get_legend(
+  # create some space to the left of the legend
+  cibersort_plot_docker + 
+    theme(legend.box.margin = margin(0, 0, 0, 12),
+          legend.key.size = unit(0.5, 'cm'),
+          legend.key.height = unit(0.5, 'cm'),
+          legend.key.width = unit(0.5, 'cm'),
+          legend.title = element_text(size=8),
+          legend.text = element_text(size=8)
+          )
+)
+cibersort_grid <- plot_grid(cibersort_plot_online + theme(legend.position = "none"),
+                            cibersort_plot_docker + theme(legend.position = "none"),
+                             ncol = 2,
       labels = c('A', 'B'),
       label_fontfamily = 'serif',
       label_fontface = 'bold',
       label_size = 15,
       align = 'h')
-ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/cibersort_plot.png", plot = cibersort_grid)
+cibersort_grid <- plot_grid(cibersort_grid, legend, rel_widths = c(3,.5))
+
+ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/cibersort_plot.png", 
+       plot = cibersort_grid,
+       width = 20,
+       height = 10,
+       units = "cm")
 ```
 
 ```{r CIBERSORT plots}
@@ -923,4 +996,4 @@ Using the deconvolution approach with CIBERSORTx, there seems to be none of the 
 Results look strange with P-value of 9999. CIBERSORTx was run using the Docker image and using the GUI, and different results were obtained. When the Docker image was used and the number of permutations was changed from 0 to 100, the p-value changed to 0.000. The proportions look different between the two methods, with the GUI predicting about 0.75 S1 with the rest being S4 for most samples.
 
 
-## References
+# References

@@ -1,39 +1,39 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-09-02 18:25:06
+2022-09-05 16:49:08
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#preparation" id="toc-preparation">Preparation</a>
-  - <a href="#read-in-data" id="toc-read-in-data">Read in data</a>
-  - <a href="#exploratory-data-analysis"
-    id="toc-exploratory-data-analysis">Exploratory data analysis</a>
-    - <a href="#pca" id="toc-pca">PCA</a>
-    - <a href="#clinical-correlations-all-studies"
-      id="toc-clinical-correlations-all-studies">Clinical correlations all
-      studies</a>
-    - <a href="#clinical-correlations-without-in-house-data"
-      id="toc-clinical-correlations-without-in-house-data">Clinical
-      correlations without In-House data</a>
-    - <a href="#removal-of-study-egad00001006144"
-      id="toc-removal-of-study-egad00001006144">Removal of study
-      EGAD00001006144</a>
-  - <a href="#surrogate-variable-analysis"
-    id="toc-surrogate-variable-analysis">Surrogate variable analysis</a>
-  - <a href="#differential-expression-analysis"
-    id="toc-differential-expression-analysis">Differential expression
-    analysis</a>
+- <a href="#read-in-data" id="toc-read-in-data">Read in data</a>
+- <a href="#exploratory-data-analysis"
+  id="toc-exploratory-data-analysis">Exploratory data analysis</a>
+  - <a href="#pca" id="toc-pca">PCA</a>
+  - <a href="#clinical-correlations-all-studies"
+    id="toc-clinical-correlations-all-studies">Clinical correlations all
+    studies</a>
+  - <a href="#clinical-correlations-without-in-house-data"
+    id="toc-clinical-correlations-without-in-house-data">Clinical
+    correlations without In-House data</a>
+  - <a href="#removal-of-study-egad00001006144"
+    id="toc-removal-of-study-egad00001006144">Removal of study
+    EGAD00001006144</a>
+- <a href="#surrogate-variable-analysis"
+  id="toc-surrogate-variable-analysis">Surrogate variable analysis</a>
+- <a href="#differential-expression-analysis"
+  id="toc-differential-expression-analysis">Differential expression
+  analysis</a>
   - <a
     href="#gene-set-variation-analysis-gsva-for-gene-signature-identification"
     id="toc-gene-set-variation-analysis-gsva-for-gene-signature-identification">Gene
     set variation analysis (GSVA) for gene signature identification</a>
-  - <a href="#chemoresistance-gene-signature"
-    id="toc-chemoresistance-gene-signature">Chemoresistance gene
-    signature</a>
-  - <a href="#deconvolution-using-cibersortx"
-    id="toc-deconvolution-using-cibersortx">Deconvolution using
-    CIBERSORTx</a>
-  - <a href="#references" id="toc-references">References</a>
+- <a href="#chemoresistance-gene-signature"
+  id="toc-chemoresistance-gene-signature">Chemoresistance gene
+  signature</a>
+- <a href="#deconvolution-using-cibersortx"
+  id="toc-deconvolution-using-cibersortx">Deconvolution using
+  CIBERSORTx</a>
+- <a href="#references" id="toc-references">References</a>
 
 # Introduction
 
@@ -56,12 +56,12 @@ separated based on the expression of different markers:
 
 (Pelon et al. 2020)
 
-FACS gating strategies can be used to isolate these various
-subpopulations. The Mechta-Grigoriou group have done this and have
-generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations.
-They generated scRNA-sequencing data for the S1 subpopulation. This data
-was deposited on the European Genome Phenome Archive, and was accessed
-via a Data Transfer Agreement.
+FACS gating strategies can be used to isolate these subpopulations. The
+Mechta-Grigoriou group have done this and have generated bulk
+RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated
+scRNA-sequencing data for the S1 subpopulation. This data was deposited
+on the European Genome Phenome Archive, and was accessed via a Data
+Transfer Agreement.
 
 The following summarises the data obtained:
 
@@ -140,8 +140,8 @@ data to further confirm the presence of these subpopulations.
 It is likely that sorting the cells using FACS alters the
 transcriptional properties of the cells compared to if they are
 separated using spreading approaches, as is seen in study
-`EGAD00001006144` and described in. This is something that we will have
-to keep in mind.
+`EGAD00001006144` and described in (Kieffer et al. 2020). This is
+something that we will have to keep in mind.
 
 The data was processed using nf-core/rnaseq version `3.8.1` using the
 default parameters. STAR/Salmon were used for alignment/quantification.
@@ -184,10 +184,11 @@ There are also: ovarian cancer samples, EPCAM+ cells (an epithelial
 marker) and samples from lymph nodes. For the time being, I will not
 consider them.
 
-## Read in data
+# Read in data
 
-Samples were processed with nf-core/rnaseq version `3.8.1` Salmon was
-used in alignment mode so there is no salmon index, so there is no
+Samples were processed with nf-core/rnaseq version `3.8.1`.
+
+Salmon was used in alignment mode so there is no salmon index and no
 checksum to import the metadata. Therefore, the parameters recommended
 in the [tximeta
 vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known)
@@ -256,9 +257,9 @@ keep <- rowSums(counts(dds_no_inhouse) >= 10) >= X
 dds_no_inhouse <- dds_no_inhouse[keep,]
 ```
 
-## Exploratory data analysis
+# Exploratory data analysis
 
-### PCA
+## PCA
 
 ``` r
 plotPCA(vsd, intgroup = c("Subpopulation"))
@@ -272,7 +273,7 @@ plotPCA(vsd, intgroup = c("Study"))
 
 ![](README_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
 
-### Clinical correlations all studies
+## Clinical correlations all studies
 
 ``` r
 peigencor
@@ -280,7 +281,7 @@ peigencor
 
 ![](README_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
-### Clinical correlations without In-House data
+## Clinical correlations without In-House data
 
 ``` r
 peigencor_no_inhouse
@@ -288,9 +289,9 @@ peigencor_no_inhouse
 
 ![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
-Here we can see strandedness (`EGAD00001006144`) is significantly
-correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the
-variance of the entire dataset respectively).
+Here we can see strandedness (i.e. the study `EGAD00001006144`) is
+significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4%
+of the variance of the entire dataset respectively).
 
 ``` r
 ppairs
@@ -298,7 +299,7 @@ ppairs
 
 ![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
-### Removal of study EGAD00001006144
+## Removal of study EGAD00001006144
 
 Given the plot above, we can see that most of the variability of PC1 can
 be attributed to Study, indicating batch effects. Methods exist to
@@ -315,7 +316,19 @@ peigencor_reduced
 
 ![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
-## Surrogate variable analysis
+``` r
+ppairs_no_6144
+```
+
+![](README_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+
+``` r
+ppairs_no_6144_colour_subpop
+```
+
+![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+# Surrogate variable analysis
 
 ``` r
 dds_no_inhouse_no_6144 <- DESeq(dds_no_inhouse_no_6144)
@@ -368,7 +381,7 @@ colData(dds_no_inhouse_no_6144)[,"Subpopulation"] <- as.factor(colData(dds_no_in
 colData(dds_no_inhouse_no_6144)[,"Tumor_JuxtaTumor"] <- as.factor(colData(dds_no_inhouse_no_6144)$Tumor_JuxtaTumor)
 ```
 
-## Differential expression analysis
+# Differential expression analysis
 
 ``` r
 # add surrogate variables to design DDS object
@@ -688,7 +701,7 @@ ggplot(mapping = aes(S4_ES)) +
       rel_heights = c(1.1, 0.9))
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
 
 ``` r
 df_plot_S1$S1_ES %>% 
@@ -790,6 +803,18 @@ median(df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"])
 
     ## [1] 0.420649
 
+``` r
+median(df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"])
+```
+
+    ## [1] 0.2539725
+
+``` r
+median(df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"])
+```
+
+    ## [1] -0.1836231
+
 We can see from the above that there is a difference between the
 enrichment scores for the gene signatures for the S1 and S3
 subpopulaions between CAF and TAN. We can suggest that the TAN
@@ -854,9 +879,9 @@ results_combined
     ## 23 Grade_2   Lobular
     ## 24 Grade_2   Lobular
 
-## Chemoresistance gene signature
+# Chemoresistance gene signature
 
-Su et al 2018 carried out differential expression analysis between
+(**Su2018?**) carried out differential expression analysis between
 chemoresistant and chemosensitive CAFs from breast cancer. It is
 possible to try and identify the resulting signature in our samples. We
 will use the list of upregulated genes in chemoresistant samples as our
@@ -913,7 +938,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -948,7 +973,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-22-2.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-24-2.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -983,7 +1008,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-22-3.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-24-3.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1024,7 +1049,46 @@ as_tibble(t(assay(chemo_es))) %>% mutate(Patient = colData(chemo_es)$Patient, Ch
     ## 23  -0.299  -0.300      12                 0.998
     ## 24  -0.291  -0.249      12                 1.17
 
-## Deconvolution using CIBERSORTx
+``` r
+wilcox.test(x = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "tumor"] and df_plot_S1$S1_ES[df_plot_S1$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 12, p-value = 0.03418
+    ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+wilcox.test(x = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "tumor"] and df_plot_S3$S3_ES[df_plot_S3$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 10, p-value = 0.021
+    ## alternative hypothesis: true location shift is not equal to 0
+
+``` r
+wilcox.test(x = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"], 
+            y = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"],
+            paired = TRUE)
+```
+
+    ## 
+    ##  Wilcoxon signed rank exact test
+    ## 
+    ## data:  df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"] and df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "juxtatumor"]
+    ## V = 55, p-value = 0.2334
+    ## alternative hypothesis: true location shift is not equal to 0
+
+# Deconvolution using CIBERSORTx
 
 CIBERSORTx (Newman et al. 2019) is the most commonly used tool for
 cell-type deconvolution. It is a machine learning method which carries
@@ -1132,7 +1196,7 @@ changed from 0 to 100, the p-value changed to 0.000. The proportions
 look different between the two methods, with the GUI predicting about
 0.75 S1 with the rest being S4 for most samples.
 
-## References
+# References
 
 <div id="refs" class="references csl-bib-body hanging-indent">
 
@@ -1143,6 +1207,17 @@ class="nocase">Cell type and gene expression deconvolution with
 BayesPrism enables Bayesian integrative analysis across bulk and
 single-cell RNA sequencing in oncology</span>.” *Nature Cancer 2022 3:4*
 3 (4): 505–17. <https://doi.org/10.1038/s43018-022-00356-3>.
+
+</div>
+
+<div id="ref-Kieffer2020" class="csl-entry">
+
+Kieffer, Yann, Hocine R. Hocine, Géraldine Gentric, Floriane Pelon,
+Charles Bernard, Brigitte Bourachot, Sonia Lameiras, et al. 2020. “<span
+class="nocase">Single-cell analysis reveals fibroblast clusters linked
+to immunotherapy resistance in cancer</span>.” *Cancer Discovery* 10
+(9): 1330–51.
+<https://doi.org/10.1158/2159-8290.CD-19-1384/333435/AM/SINGLE-CELL-ANALYSIS-REVEALS-FIBROBLAST-CLUSTERS>.
 
 </div>
 
@@ -1161,8 +1236,8 @@ samples</span>.” *Genome Biology* 23 (1): 1–13.
 Newman, Aaron M., Chih Long Liu, Michael R. Green, Andrew J. Gentles,
 Weiguo Feng, Yue Xu, Chuong D. Hoang, Maximilian Diehn, and Ash A.
 Alizadeh. 2015. “<span class="nocase">Robust enumeration of cell subsets
-from tissue expression profiles</span>.” *Nature Methods* 12 (5):
-453–57. <https://doi.org/10.1038/nmeth.3337>.
+from tissue expression profiles</span>.” *Nature Methods 2015 12:5* 12
+(5): 453–57. <https://doi.org/10.1038/nmeth.3337>.
 
 </div>
 
