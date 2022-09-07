@@ -1,23 +1,38 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-09-05 16:49:08
+2022-09-07 17:48:16
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#preparation" id="toc-preparation">Preparation</a>
 - <a href="#read-in-data" id="toc-read-in-data">Read in data</a>
 - <a href="#exploratory-data-analysis"
   id="toc-exploratory-data-analysis">Exploratory data analysis</a>
-  - <a href="#pca" id="toc-pca">PCA</a>
-  - <a href="#clinical-correlations-all-studies"
-    id="toc-clinical-correlations-all-studies">Clinical correlations all
-    studies</a>
-  - <a href="#clinical-correlations-without-in-house-data"
-    id="toc-clinical-correlations-without-in-house-data">Clinical
+  - <a href="#pca--clinical-correlations-all-studies"
+    id="toc-pca--clinical-correlations-all-studies">PCA + clinical
+    correlations all studies</a>
+  - <a href="#pca--clinical-correlations-without-in-house-data"
+    id="toc-pca--clinical-correlations-without-in-house-data">PCA + clinical
     correlations without In-House data</a>
-  - <a href="#removal-of-study-egad00001006144"
-    id="toc-removal-of-study-egad00001006144">Removal of study
+  - <a
+    href="#pca--clinical-correlations-without-in-house-data-or-study-egad00001006144"
+    id="toc-pca--clinical-correlations-without-in-house-data-or-study-egad00001006144">PCA
+    + clinical correlations without In-House data or study
     EGAD00001006144</a>
+- <a href="#batch-correction-with-combat-seq-and-limma"
+  id="toc-batch-correction-with-combat-seq-and-limma">Batch correction
+  with Combat-Seq and limma</a>
+  - <a href="#combat-seq" id="toc-combat-seq">Combat-Seq</a>
+    - <a href="#combat-seq-no-clinical-covariates"
+      id="toc-combat-seq-no-clinical-covariates">Combat-Seq no clinical
+      covariates</a>
+    - <a href="#limmaremovebatcheffects-with-all-covariates"
+      id="toc-limmaremovebatcheffects-with-all-covariates">limma::removeBatchEffects
+      with all covariates</a>
+    - <a
+      href="#limmaremovebatcheffects-with-no-clinical-covariates-or-subpopulation-information"
+      id="toc-limmaremovebatcheffects-with-no-clinical-covariates-or-subpopulation-information">limma::removeBatchEffects
+      with no clinical covariates or subpopulation information</a>
 - <a href="#surrogate-variable-analysis"
   id="toc-surrogate-variable-analysis">Surrogate variable analysis</a>
 - <a href="#differential-expression-analysis"
@@ -259,21 +274,23 @@ dds_no_inhouse <- dds_no_inhouse[keep,]
 
 # Exploratory data analysis
 
-## PCA
+## PCA + clinical correlations all studies
+
+For consistency between the DESeq2 `plotPCA` function (which by default
+takes the 500 most variable genes) and the PCATools `pca` function, all
+genes were used when carrying out PCA.
 
 ``` r
-plotPCA(vsd, intgroup = c("Subpopulation"))
+plotPCA(vsd, intgroup = c("Subpopulation"), ntop = nrow(vsd))
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-1-1.png)<!-- -->
 
 ``` r
-plotPCA(vsd, intgroup = c("Study"))
+plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd))
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
-
-## Clinical correlations all studies
 
 ``` r
 peigencor
@@ -281,13 +298,72 @@ peigencor
 
 ![](README_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
-## Clinical correlations without In-House data
+``` r
+ppairs
+```
+
+![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
+## PCA + clinical correlations without In-House data
+
+``` r
+plotPCA(vsd_no_inhouse, intgroup = c("Subpopulation"), ntop = nrow(vsd_no_inhouse))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_no_inhouse, intgroup = c("Study"), ntop = nrow(vsd_no_inhouse))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-7-2.png)<!-- -->
+
+``` r
+metadata_pca_no_inhouse <- colData(vsd_no_inhouse)[,1:5]
+metadata_pca_no_inhouse <- as.data.frame(metadata_pca_no_inhouse[!names(metadata_pca_no_inhouse) %in% c("names")])
+p_no_inhouse <- pca(vsd_mat_no_inhouse, metadata = metadata_pca_no_inhouse)
+peigencor_no_inhouse <- eigencorplot(p_no_inhouse,
+    components = getComponents(p_no_inhouse, 1:10),
+    metavars = colnames(metadata_pca_no_inhouse),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    #corUSE = 'pairwise.complete.obs',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations without In-House',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+    ## Warning in eigencorplot(p_no_inhouse, components = getComponents(p_no_inhouse, :
+    ## Study is not numeric - please check the source data as non-numeric variables
+    ## will be coerced to numeric
+
+    ## Warning in eigencorplot(p_no_inhouse, components = getComponents(p_no_inhouse, :
+    ## Subpopulation is not numeric - please check the source data as non-numeric
+    ## variables will be coerced to numeric
+
+    ## Warning in eigencorplot(p_no_inhouse, components = getComponents(p_no_inhouse, :
+    ## Tumor_JuxtaTumor is not numeric - please check the source data as non-numeric
+    ## variables will be coerced to numeric
+
+    ## Warning in eigencorplot(p_no_inhouse, components = getComponents(p_no_inhouse, :
+    ## Strandedness is not numeric - please check the source data as non-numeric
+    ## variables will be coerced to numeric
 
 ``` r
 peigencor_no_inhouse
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 Here we can see strandedness (i.e. the study `EGAD00001006144`) is
 significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4%
@@ -297,9 +373,9 @@ of the variance of the entire dataset respectively).
 ppairs
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
-## Removal of study EGAD00001006144
+## PCA + clinical correlations without In-House data or study EGAD00001006144
 
 Given the plot above, we can see that most of the variability of PC1 can
 be attributed to Study, indicating batch effects. Methods exist to
@@ -311,22 +387,261 @@ the clinical correlations plot if we remove our outlier study
 `EGAD00001006144` as well as our in-house data.
 
 ``` r
+plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Subpopulation"), ntop = nrow(vsd_no_inhouse_no_6144))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20without%20study%206144%20or%20inhouse%20data-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Study"), ntop = nrow(vsd_no_inhouse_no_6144))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20without%20study%206144%20or%20inhouse%20data-2.png)<!-- -->
+
+``` r
 peigencor_reduced
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
 
 ``` r
 ppairs_no_6144
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
 ``` r
 ppairs_no_6144_colour_subpop
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+# Batch correction with Combat-Seq and limma
+
+## Combat-Seq
+
+Combat-Seq models the distribution for each gene using a negative
+binomial regression model. This model contains mean and dispersion
+parameter. The model allows us to preserve changes in counts due to
+biological condition after adjustment. However, in our case, it is not
+possible to guarantee the preservation of changes due to biological
+condition (CAF subpopulation) while removing batch effects. Here we
+carry out batch correction using Combat-Seq, and will look at the data
+after adjustment to see if biological condition is preserved after
+adjustment. We should note here that the S3 subpopulation does not
+separate well from the other subpopulations before batch correction,
+even though the S3 data comes from a different “study”.
+
+### Combat-Seq no clinical covariates
+
+``` r
+counts_matrix <- assay(dds)
+batch_all_samples <- metadata$Study
+adjusted_all_samples <- ComBat_seq(counts = counts_matrix, batch = batch_all_samples)
+```
+
+    ## Found 5 batches
+    ## Using null model in ComBat-seq.
+    ## Adjusting for 0 covariate(s) or covariate level(s)
+    ## Estimating dispersions
+    ## Fitting the GLM model
+    ## Shrinkage off - using GLM estimates for parameters
+    ## Adjusting the data
+
+``` r
+dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
+```
+
+    ## converting counts to integer mode
+
+``` r
+# not sure about the blind = FALSE here
+vsd_batch_corrected <- vst(dds_batch_corrected, blind = FALSE)
+```
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20no%20covariate-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Study"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20no%20covariate-2.png)<!-- -->
+
+``` r
+peigencor_batch_corrected
+```
+
+![](README_files/figure-gfm/unnamed-chunk-18-1.png)<!-- --> \###
+Combat-Seq with Tumour_Juxtatumor as covariate
+
+``` r
+adjusted_all_samples <- ComBat_seq(counts = counts_matrix, batch = batch_all_samples, group = metadata$Tumor_JuxtaTumor)
+```
+
+    ## Found 5 batches
+    ## Using full model in ComBat-seq.
+    ## Adjusting for 1 covariate(s) or covariate level(s)
+    ## Estimating dispersions
+    ## Fitting the GLM model
+    ## Shrinkage off - using GLM estimates for parameters
+    ## Adjusting the data
+
+``` r
+dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
+```
+
+    ## converting counts to integer mode
+
+``` r
+# not sure about the blind = FALSE here
+vsd_batch_corrected <- vst(dds_batch_corrected, blind = FALSE)
+```
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20Tumor_Juxtatumor%20covariate-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Study"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20Tumor_Juxtatumor%20covariate-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20Tumor_Juxtatumor%20covariate-3.png)<!-- -->
+
+``` r
+peigencor_batch_corrected
+```
+
+![](README_files/figure-gfm/unnamed-chunk-21-1.png)<!-- --> \##
+limma::removeBatchEffects
+
+### limma::removeBatchEffects with all covariates
+
+Limma’s removeBatchEffect function requires a design matrix as input,
+this is the “treatment condition” we wish to preserve. It is usually the
+design matrix with all experimental factors other than batch effects.
+The ideal scenario would be to include Subpopulation in this matrix.
+However, this treats `Unknown` as its own Subpopulation, and so will
+preserve differences between the InHouse samples and the other samples.
+This is contrary to what we want when assigning our samples to a
+cluster.
+
+``` r
+vsd_not_blind <- vst(dds, blind = FALSE)
+```
+
+    ## using 'avgTxLength' from assays(dds), correcting for library size
+
+``` r
+mat <- assay(vsd_not_blind)
+# create model matrix, full model matrix with Tumor_JuxtaTumor and Subpopulation
+mm <- model.matrix(~Tumor_JuxtaTumor+Subpopulation, colData(vsd_not_blind))
+mat <- limma::removeBatchEffect(mat, batch = vsd_not_blind$Study, design = mm)
+```
+
+    ## Coefficients not estimable: batch2 batch4
+
+    ## Warning: Partial NA coefficients for 17763 probe(s)
+
+``` r
+vsd_batch_corrected_limma_all_covariates <- vsd_not_blind
+assay(vsd_batch_corrected_limma_all_covariates) <- mat
+```
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected_limma_all_covariates))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Study"),ntop = nrow(vsd_batch_corrected_limma_all_covariates) )
+```
+
+![](README_files/figure-gfm/unnamed-chunk-24-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected_limma_all_covariates))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-24-3.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Subpopulation"), ntop = 500)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Study"),ntop = 500 )
+```
+
+![](README_files/figure-gfm/unnamed-chunk-25-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_all_covariates, intgroup = c("Tumor_JuxtaTumor"), ntop =500)
+```
+
+![](README_files/figure-gfm/unnamed-chunk-25-3.png)<!-- -->
+
+We can see that this removes batch effects and preserves differences
+between the subpopulations. However, it treats our Unknown samples as
+their own subpopulation.This is a case where the number of highest
+variable genes chosen makes a big difference.
+
+``` r
+peigencor_batch_corrected
+```
+
+![](README_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
+
+### limma::removeBatchEffects with no clinical covariates or subpopulation information
+
+``` r
+# create model matrix, full model matrix with Tumor_JuxtaTumor and Subpopulation
+mm <- model.matrix(~1, colData(vsd_not_blind))
+mat <- limma::removeBatchEffect(mat, batch = vsd_not_blind$Study, design = mm)
+```
+
+``` r
+vsd_batch_corrected_limma_no_covariates <- vsd_not_blind
+assay(vsd_batch_corrected_limma_no_covariates) <- mat
+```
+
+``` r
+plotPCA(vsd_batch_corrected_limma_no_covariates, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected_limma_no_covariates))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-29-1.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_no_covariates, intgroup = c("Study"),ntop = nrow(vsd_batch_corrected_limma_no_covariates) )
+```
+
+![](README_files/figure-gfm/unnamed-chunk-29-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected_limma_no_covariates, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected_limma_no_covariates))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-29-3.png)<!-- -->
+
+``` r
+peigencor_batch_corrected
+```
+
+![](README_files/figure-gfm/unnamed-chunk-31-1.png)<!-- -->
 
 # Surrogate variable analysis
 
@@ -701,7 +1016,7 @@ ggplot(mapping = aes(S4_ES)) +
       rel_heights = c(1.1, 0.9))
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-20-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-40-1.png)<!-- -->
 
 ``` r
 df_plot_S1$S1_ES %>% 
@@ -881,7 +1196,7 @@ results_combined
 
 # Chemoresistance gene signature
 
-(**Su2018?**) carried out differential expression analysis between
+(Su et al. 2018) carried out differential expression analysis between
 chemoresistant and chemosensitive CAFs from breast cancer. It is
 possible to try and identify the resulting signature in our samples. We
 will use the list of upregulated genes in chemoresistant samples as our
@@ -938,7 +1253,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-24-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-44-1.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -973,7 +1288,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-24-2.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-44-2.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1008,7 +1323,7 @@ mtext("Gene sets", side=4, line=0, cex=1.5)
 mtext("Samples", side=1, line=4, cex=1.5, at = 0.42)
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-24-3.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-44-3.png)<!-- -->
 
 ``` r
 #dev.off()
@@ -1091,14 +1406,15 @@ wilcox.test(x = df_plot_S4$S4_ES[df_plot_S4$Tumor_JuxtaTumor == "tumor"],
 # Deconvolution using CIBERSORTx
 
 CIBERSORTx (Newman et al. 2019) is the most commonly used tool for
-cell-type deconvolution. It is a machine learning method which carries
-out batch correction, correcting for between-platform differences in
-expression data. In this case, the signature matrix was made using all
-of the available CAF subpopulation data (40 S1 samples, 25 S3 samples,
-24 S4 samples). It is possible to infer the proportions of the different
-subpopulations as well as a subpopulation-specific gene expression
-matrix for each sample. Either scRNA-seq, bulk RNA-seq or microarray
-data can be used as the reference.
+cell-type deconvolution. It is a machine learning method based on
+support vector regression, which carries out batch correction,
+correcting for between-platform differences in expression data. In this
+case, the signature matrix was made using all of the available CAF
+subpopulation data (40 S1 samples, 25 S3 samples, 24 S4 samples). It is
+possible to infer the proportions of the different subpopulations as
+well as a subpopulation-specific gene expression matrix for each sample.
+Either scRNA-seq, bulk RNA-seq or microarray data can be used as the
+reference.
 
 - Create signature matrix for CIBERSORTx
 - TPM normalise data,probably optional
@@ -1259,6 +1575,16 @@ class="nocase">Cancer-associated fibroblast heterogeneity in axillary
 lymph nodes drives metastases in breast cancer through complementary
 mechanisms</span>.” *Nature Communications 2020 11:1* 11 (1): 1–20.
 <https://doi.org/10.1038/s41467-019-14134-w>.
+
+</div>
+
+<div id="ref-Su2018" class="csl-entry">
+
+Su, Shicheng, Jianing Chen, Herui Yao, Jiang Liu, Shubin Yu, Liyan Lao,
+Minghui Wang, et al. 2018. “<span class="nocase">CD10 + GPR77 +
+Cancer-Associated Fibroblasts Promote Cancer Formation and
+Chemoresistance by Sustaining Cancer Stemness</span>.” *Cell* 172 (4):
+841–856.e16. <https://doi.org/10.1016/J.CELL.2018.01.009>.
 
 </div>
 
