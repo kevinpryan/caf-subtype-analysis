@@ -64,7 +64,7 @@ counts_matrix_remove_outliers <- assay(dds_remove_outliers)
 batch_remove_outliers <- colData(dds_remove_outliers)$Study
 print(paste("Number of genes before filtering: ", nrow(counts_matrix_remove_outliers), sep = ""))
 # remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
-counts_filt <- counts_matrix_remove_outliers[apply(counts, 1, function(x) sum(x == 0)) < ncol(counts_matrix_remove_outliers) / 3, ]
+counts_filt <- counts_matrix_remove_outliers[apply(counts_matrix_remove_outliers, 1, function(x) sum(x == 0)) < ncol(counts_matrix_remove_outliers) / 3, ]
 print(paste("Number of genes after filtering: ", nrow(counts_filt), sep = ""))
 combat_seq_group <- colData(dds_remove_outliers)$Tumor_JuxtaTumor
 print("batch correcting...")
