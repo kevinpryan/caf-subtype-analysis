@@ -62,15 +62,19 @@ vsd_remove_outliers_mat <- assay(vsd_remove_outliers)
 # remove batch effect
 counts_matrix_remove_outliers <- assay(dds_remove_outliers)
 batch_remove_outliers <- colData(dds_remove_outliers)$Study
-print("batch correcting...")
-ptm <- proc.time()
-adjusted_remove_outliers <- ComBat_seq(counts = counts_matrix_remove_outliers, batch = batch_remove_outliers, group = colData(dds_remove_outliers)$Tumor_JuxtaTumor)
-time_taken <- proc.time() - ptm
-print("time taken...")
-print(time_taken)
-dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
+print(paste("batch...", batch_remove_outliers))
+print(paste("group...", colData(dds_remove_outliers)$Tumor_JuxtaTumor))
+
+
+#print("batch correcting...")
+#ptm <- proc.time()
+#adjusted_remove_outliers <- ComBat_seq(counts = counts_matrix_remove_outliers, batch = batch_remove_outliers, group = colData(dds_remove_outliers)$Tumor_JuxtaTumor)
+#time_taken <- proc.time() - ptm
+#print("time taken...")
+#print(time_taken)
+#dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
 # not sure if blind should be TRUE or FALSE here
 #vsd_batch_corrected <- vst(dds_batch_corrected, blind = TRUE)
-date <- Sys.Date()
-outfile <- paste(outdir, "dds_batch_corrected_", date, ".Rds", sep = "")
-saveRDS(dds_batch_corrected, file = outfile)
+#date <- Sys.Date()
+#outfile <- paste(outdir, "dds_batch_corrected_", date, ".Rds", sep = "")
+#saveRDS(dds_batch_corrected, file = outfile)
