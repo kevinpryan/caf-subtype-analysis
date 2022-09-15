@@ -53,7 +53,7 @@ rv <- rowVars(assay(vsd))
 pc <- prcomp(t(assay(vsd)[head(order(-rv),nrow(assay(vsd))),]))
 # -110 found by visual inspection - see README
 idx <- pc$x[,1] < -110
-print(paste("Number of samples being removed,", idx, sep = " "))
+print(paste("Number of samples being removed,", length(idx[which(idx == TRUE)]), sep = " "))
 patient_samples <- rownames(metadata)
 patient_samples <- patient_samples[!idx]
 dds_remove_outliers <- dds[,!idx]
@@ -62,19 +62,20 @@ vsd_remove_outliers_mat <- assay(vsd_remove_outliers)
 # remove batch effect
 counts_matrix_remove_outliers <- assay(dds_remove_outliers)
 batch_remove_outliers <- colData(dds_remove_outliers)$Study
-print(paste("batch...", batch_remove_outliers))
-print(paste("group...", colData(dds_remove_outliers)$Tumor_JuxtaTumor))
-
-
-#print("batch correcting...")
-#ptm <- proc.time()
-#adjusted_remove_outliers <- ComBat_seq(counts = counts_matrix_remove_outliers, batch = batch_remove_outliers, group = colData(dds_remove_outliers)$Tumor_JuxtaTumor)
-#time_taken <- proc.time() - ptm
-#print("time taken...")
-#print(time_taken)
-#dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
+print(paste("Number of genes before filtering: ", nrow(counts_matrix_remove_outliers), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+counts_filt <- counts_matrix_remove_outliers[apply(counts, 1, function(x) sum(x == 0)) < ncol(counts_matrix_remove_outliers) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(counts_filt), sep = ""))
+combat_seq_group <- colData(dds_remove_outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+ptm <- proc.time()
+adjusted_remove_outliers <- ComBat_seq(counts = counts_filt, batch = batch_remove_outliers, group = combat_seq_group, full_mod = TRUE)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_remove_outliers, colData = colData(dds_remove_outliers), design = ~1)
 # not sure if blind should be TRUE or FALSE here
 #vsd_batch_corrected <- vst(dds_batch_corrected, blind = TRUE)
-#date <- Sys.Date()
-#outfile <- paste(outdir, "dds_batch_corrected_", date, ".Rds", sep = "")
-#saveRDS(dds_batch_corrected, file = outfile)
+date <- Sys.Date()
+outfile <- paste(outdir, "dds_batch_corrected_group_tumor_", date, ".Rds", sep = "")
+saveRDS(dds_batch_corrected, file = outfile)
