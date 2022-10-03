@@ -208,8 +208,8 @@ patient_samples <- patient_samples[!idx]
 metadata_reduced <- metadata[patient_samples,]
 date <- Sys.Date()
 metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_hgnc_", date, ".txt", sep = "")
-print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
-write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
+#print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+#write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
 ```
 
 ```{r}
@@ -244,7 +244,7 @@ metadata_reduced <- metadata[patient_samples,]
 date <- Sys.Date()
 metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_ensembl_gene_id_version_", date, ".txt", sep = "")
 print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
-write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
+#write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
 ```
 
 ```{r}
@@ -334,8 +334,8 @@ plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Tumor_JuxtaTumor
 ```{r Write to file hgnc}
 date <- Sys.Date()
 outfile.hgnc <- paste("../intermediate_files/dds_batch_corrected_group_tumor_hgnc_", date, ".Rds", sep = "")
-print(paste("writing batch corrected data to ", outfile.hgnc, sep = ""))
-saveRDS(dds.hgnc.remove.outliers.batch.corrected, file = outfile.hgnc)
+#print(paste("writing batch corrected data to ", outfile.hgnc, sep = ""))
+#saveRDS(dds.hgnc.remove.outliers.batch.corrected, file = outfile.hgnc)
 ```
 
 ```{r Write to file ensembl gene id version}
