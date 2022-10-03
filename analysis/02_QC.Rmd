@@ -1,0 +1,346 @@
+---
+title: "QC"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+bibliography: citations.bib  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(here)
+library(biomaRt)
+library(tximeta)
+library(DESeq2)
+library(ggplot2)
+library(PCAtools)
+library(sva)
+```
+
+
+# Read in data
+
+Samples were processed with nf-core/rnaseq version `3.8.1`.
+
+Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
+
+```{r Functions}
+filter_out_low_expressed <- function(dds){
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+}
+```
+
+```{r Prepare to read in data, include = FALSE}
+# metadata file created with create_metadata.R
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1, sep = "\t")
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
+                      Subpopulation = metadata$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+
+# tx2gene but using the hgnc symbol instead of ensembl gene id version
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+                #host="uswest.ensembl.org")
+tx2gene.hgnc <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+tx2gene.ensg.version <- getBM(attributes = c("ensembl_transcript_id_version", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+```
+
+```{r Read in data and filter out lowly expressed genes}
+# salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
+# txOut = FALSE means to summarise to gene level (i.e. don't give out transcripts, give out gene level)
+se.hgnc <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene.hgnc)
+se.ensg <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene.ensg.version)
+dds.hgnc <- DESeqDataSet(se.hgnc, design = ~1)
+dds.ensg <- DESeqDataSet(se.ensg, design = ~1)
+dds.hgnc <- filter_out_low_expressed(dds.hgnc)
+dds.ensg <- filter_out_low_expressed(dds.ensg)
+```
+
+```{r Variance stabilising transformation}
+vsd.hgnc <- vst(dds.hgnc, blind = TRUE)
+vsd.ensg <- vst(dds.ensg, blind = TRUE)
+```
+
+# Exploratory data analysis
+
+## PCA + clinical correlations all studies
+
+For consistency between the DESeq2 `plotPCA` function (which by default takes the 500 most variable genes) and the PCATools `pca` function, all genes were used when carrying out PCA.
+
+```{r PCA hgnc}
+plotPCA(vsd.hgnc, intgroup = c("Subpopulation"), ntop = nrow(vsd.hgnc)) + 
+    ggtitle("PCA using HGNC gene IDs")
+
+plotPCA(vsd.hgnc, intgroup = c("Study"), ntop = nrow(vsd.hgnc)) +
+    ggtitle("PCA using HGNC gene IDs")
+
+plotPCA(vsd.hgnc, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.hgnc)) + 
+  ggtitle("PCA using HGNC gene IDs")
+```
+
+There seems to be 4 groups of samples here: the samples at PC1 < -100 which look like outliers, the main group in the middle (-100 < PC1 < 50) and then 2 groups which separate on PC2. One of these groups comes completely from one batch (EGAD00001005744) which is purely tumour CAFs and the other is a mixture of our in-house samples and study EGAD00001006144. There is clear separation between the in-house samples and EGAD00001006144, so perhaps they could be called one cluster. The in-house samples underwent culturing in a medium to promote the growth of fibroblastic cells, whereas the EGAD00001006144 samples either underwent separation by sorting or spreading. It is possible that there are similarities in the conditions under which the samples were kept which altered their transcriptomic properties.
+
+We can see that there are 16 samples that explain much of the variation in PC1, meaning that they are quite different from the other samples. Let's have a look at the PCA loadings using the `biplot` from `PCATools`.
+
+It is important to note here that our interpretation of the PCA is subjective, and can change depending on the number of highly variable genes we consider when carrying out PCA.
+
+```{r PCA ensembl}
+plotPCA(vsd.ensg, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg)) + 
+    ggtitle("PCA using Ensembl gene ID version")
+
+plotPCA(vsd.ensg, intgroup = c("Study"), ntop = nrow(vsd.ensg)) +
+    ggtitle("PCA using Ensembl gene ID version")
+
+plotPCA(vsd.ensg, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.ensg)) + 
+  ggtitle("PCA using Ensembl gene ID version")
+```
+
+```{r PCA on full dataset}
+vsd.mat.hgnc <- assay(vsd.hgnc)
+metadata_pca <- metadata[,1:4]
+p <- pca(vsd.mat.hgnc, metadata = metadata_pca)
+```
+
+
+```{r Biplot}
+biplot(p, showLoadings = T, lab = NULL)
+```
+
+There seems to be 10 genes that are associated with PC2, separating our main cluster and the In-house/EGAD00001006144. samples.
+
+* FOS
+  + Proto-oncogene, forms part of TF complex, regulators of cell proliferation, differentiation, transformation, apoptosis.
+* APOD
+  + Apolipoprotein D, encodes part of HDL
+  + Expression induced in quiescent/senescent fibroblasts [@Rassart2020], and so may inhibit cell growth
+  + Downregulated in CAFs in our initial CAF vs TAN DE analysis
+* TMEM176B
+  + A transmembrane protein
+  + Identified as LR8 in 1999 [@Lurton1999] and was proposed as a marker for fibroblasts and their subpopulations.
+  + It has recently been found to be important in the AKT/mTOR pathway, which is involved in cell proliferation (and hence can be implicated in cancer) [@Kang2021].
+* SELENOP
+  + Selenoprotein P
+  + Increased expression stops conversion of fibroblasts to myofibroblasts [@Short2017]
+* PLXDC1
+  + Plexin Domain Containing 1
+  + Involved in angiogenesis
+  + Cell surface receptor for Pigment Epithelium Derived Factor [@Cheng2014]
+* P4HB
+  + Protein disulfide isomerase
+  + Possible fibroblast marker [@Wetzig2013]
+* CHPF
+  + Chondroitin polymerising factor
+  + Alters the formation of chondroitin sulphate in breast cancer. Chondroitin sulphate forms "abnormal" chains in breast cancer [@Liao2021]
+* CEMIP
+  + Cell Migration Inducing Hyaluronidase 1
+  + WNT-related [@Dong2021]
+  + High expression associated with malignancy and increased CAF infiltration [@Dong2021]. Possible biomarker. Dong study looked at expression in tumour cells, here we can see that its expression seems to change between different groups of CAFs too.
+* TFPI2
+  + Tissue factor pathway inhibitor 2.
+  + Serine proteinase
+  + Tumour suppressor
+  + Inhibits plasmin, thereby inhibiting the activation of MMPs
+  + Increased expression of TFPI2 in cancer cells downregulates the expression of MMPs in CAFs (the opposite is the case too) [@Gaud2011].
+* GREM1
+  + Antagonist of BMP, playing a role in tissue differentiation.
+  + Expressed in basal cell carcinoma CAF myofibroblasts [@Kim2017].
+  + Expression of GREM1 derived from CAFs thought to promote cancer progression [@Ren2019].
+  + Found to be expressed in CAF cell lines but not in breast cancer cell lines [@Ren2019].
+  + Its expression in bulk tumour samples is correlated with the expression of CAF markers such as FAP [@Ren2019].
+
+We can also re-plot the PCA and colour the points by expression of these genes. It is not done here.
+
+## Clinical correlations
+
+```{r, include = FALSE}
+
+peigencor <- eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+```{r}
+peigencor
+```
+
+This demonstrates that there are batch effects that need to be removed.
+
+## Outlier removal
+
+### HGNC symbol 
+
+```{r}
+rv <- rowVars(assay(vsd.hgnc))
+pc <- prcomp(t(assay(vsd.hgnc)[head(order(-rv),nrow(assay(vsd.hgnc))),]))
+# -110 found by visual inspection - see README
+idx <- pc$x[,1] < -110
+print(paste("Number of samples being removed,", length(idx[which(idx == TRUE)]), sep = " "))
+patient_samples <- rownames(metadata)
+patient_samples <- patient_samples[!idx]
+# create new metadata file 
+metadata_reduced <- metadata[patient_samples,]
+date <- Sys.Date()
+metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_hgnc_", date, ".txt", sep = "")
+print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
+```
+
+```{r}
+dds.hgnc.remove.outliers <- dds.ensg[,!idx]
+vsd.hgnc.remove.outliers <- vst(dds.hgnc.remove.outliers, blind = TRUE)
+#vsd.ensg.remove.outliers.mat <- assay(vsd.ensg.remove.outliers)
+```
+
+```{r PCA outliers removed hgnc}
+plotPCA(vsd.hgnc.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.hgnc.remove.outliers)) + 
+    ggtitle("PCA using HGNC symbol outliers removed")
+
+plotPCA(vsd.hgnc.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.hgnc.remove.outliers)) +
+    ggtitle("PCA using HGNC symbol version outliers removed")
+
+plotPCA(vsd.hgnc.remove.outliers, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.hgnc.remove.outliers)) + 
+  ggtitle("PCA using HGNC symbol outliers removed")
+```
+
+### Ensg gene id version
+
+```{r}
+rv <- rowVars(assay(vsd.ensg))
+pc <- prcomp(t(assay(vsd.ensg)[head(order(-rv),nrow(assay(vsd.ensg))),]))
+# -110 found by visual inspection - see README
+idx <- pc$x[,1] < -200
+print(paste("Number of samples being removed,", length(idx[which(idx == TRUE)]), sep = " "))
+patient_samples <- rownames(metadata)
+patient_samples <- patient_samples[!idx]
+# create new metadata file 
+metadata_reduced <- metadata[patient_samples,]
+date <- Sys.Date()
+metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_ensembl_gene_id_version_", date, ".txt", sep = "")
+print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
+```
+
+```{r}
+dds.ensg.remove.outliers <- dds.ensg[,!idx]
+vsd.ensg.remove.outliers <- vst(dds.ensg.remove.outliers, blind = TRUE)
+#vsd.ensg.remove.outliers.mat <- assay(vsd.ensg.remove.outliers)
+```
+
+```{r PCA outliers removed ensg}
+plotPCA(vsd.ensg.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg.remove.outliers)) + 
+    ggtitle("PCA using Ensembl gene ID version outliers removed")
+
+plotPCA(vsd.ensg.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.ensg.remove.outliers)) +
+    ggtitle("PCA using Ensembl gene ID version outliers removed")
+
+plotPCA(vsd.ensg.remove.outliers, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.ensg.remove.outliers)) + 
+  ggtitle("PCA using Ensembl gene ID version outliers removed")
+```
+
+## Batch Correction
+
+### HGNC symbol
+
+```{r Combat-Seq hgnc}
+# remove batch effects
+dds.hgnc.remove.outliers.mat <- assay(dds.hgnc.remove.outliers)
+outliers.removed.batch <- colData(dds.hgnc.remove.outliers)$Study
+print(paste("Number of genes before filtering: ", nrow(dds.hgnc.remove.outliers.mat), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+dds.hgnc.remove.outliers.mat.filtered <- dds.hgnc.remove.outliers.mat[apply(dds.hgnc.remove.outliers.mat, 1, function(x) sum(x == 0)) < ncol(dds.hgnc.remove.outliers.mat) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(dds.hgnc.remove.outliers.mat.filtered), sep = ""))
+outliers.removed.group <- colData(dds.hgnc.remove.outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+ptm <- proc.time()
+dds.hgnc.remove.outliers.mat.batch.corrected <- ComBat_seq(counts = dds.hgnc.remove.outliers.mat.filtered, batch = outliers.removed.batch, group = outliers.removed.group, full_mod = TRUE)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+dds.hgnc.remove.outliers.batch.corrected <- DESeqDataSetFromMatrix(dds.hgnc.remove.outliers.mat.batch.corrected, colData = colData(dds.hgnc.remove.outliers), design = ~1)
+vsd.hgnc.remove.outliers.batch.corrected <- vst(dds.hgnc.remove.outliers.batch.corrected, blind = TRUE)
+```
+
+```{r PCA outliers removed batch corrected}
+plotPCA(vsd.hgnc.remove.outliers.batch.corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd.hgnc.remove.outliers.batch.corrected)) + 
+    ggtitle("PCA using HGNC symbol outliers removed batch corrected")
+
+plotPCA(vsd.hgnc.remove.outliers.batch.corrected, intgroup = c("Study"), ntop = nrow(vsd.hgnc.remove.outliers.batch.corrected)) +
+    ggtitle("PCA using HGNC symbol version outliers removed")
+
+plotPCA(vsd.hgnc.remove.outliers.batch.corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.hgnc.remove.outliers.batch.corrected)) + 
+  ggtitle("PCA using HGNC symbol outliers removed batch corrected")
+```
+
+### Ensembl gene ID version
+
+```{r Combat-Seq Ensembl}
+# remove batch effects
+dds.ensg.remove.outliers.mat <- assay(dds.ensg.remove.outliers)
+outliers.removed.batch <- colData(dds.ensg.remove.outliers)$Study
+print(paste("Number of genes before filtering: ", nrow(dds.ensg.remove.outliers.mat), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+dds.ensg.remove.outliers.mat.filtered <- dds.ensg.remove.outliers.mat[apply(dds.ensg.remove.outliers.mat, 1, function(x) sum(x == 0)) < ncol(dds.ensg.remove.outliers.mat) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(dds.ensg.remove.outliers.mat.filtered), sep = ""))
+outliers.removed.group <- colData(dds.ensg.remove.outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+ptm <- proc.time()
+dds.ensg.remove.outliers.mat.batch.corrected <- ComBat_seq(counts = dds.ensg.remove.outliers.mat.filtered, batch = outliers.removed.batch, group = outliers.removed.group, full_mod = TRUE)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+dds.ensg.remove.outliers.batch.corrected <- DESeqDataSetFromMatrix(dds.ensg.remove.outliers.mat.batch.corrected, colData = colData(dds.ensg.remove.outliers), design = ~1)
+vsd.ensg.remove.outliers.batch.corrected <- vst(dds.ensg.remove.outliers.batch.corrected, blind = TRUE)
+```
+
+
+```{r PCA outliers removed}
+plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) + 
+    ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
+
+plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Study"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) +
+    ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
+
+plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) + 
+  ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
+```
+
+```{r Write to file hgnc}
+date <- Sys.Date()
+outfile.hgnc <- paste("../intermediate_files/dds_batch_corrected_group_tumor_hgnc_", date, ".Rds", sep = "")
+print(paste("writing batch corrected data to ", outfile.hgnc, sep = ""))
+saveRDS(dds.hgnc.remove.outliers.batch.corrected, file = outfile.hgnc)
+```
+
+```{r Write to file ensembl gene id version}
+date <- Sys.Date()
+outfile.ensg <- paste("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_", date, ".Rds", sep = "")
+print(paste("writing batch corrected data to ", outfile.ensg, sep = ""))
+saveRDS(dds.ensg.remove.outliers.batch.corrected, file = outfile.ensg)
+```

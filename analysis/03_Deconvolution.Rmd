@@ -1,0 +1,265 @@
+---
+title: "Deconvolution"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(DESeq2)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(here)
+library(biomaRt)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+```
+
+# CIBERSORT
+
+CIBERSORT requires TPM as input, therefore we need to convert our batch corrected counts to TPM. To get the gene lengths for this, we will use the effective gene lengths from the Salmon output. Therefore, we must use the ENGS gene id version.
+
+## Generate inputs to CIBERSORT
+
+```{r}
+tpm.convert <- function(counts.mat, gene.length){
+x <- counts.mat / gene.length
+#Then with this matrix x, you do the following:
+tpm.mat <- t( t(x) * 1e6 / colSums(x) )
+}
+
+read_in_quant_genes <- function(file.name){
+  x <- read.table(file = file.name, header = T)[,c(1,3)]
+  #colnames(x)[2] <- as.character(sample.name)
+  return(x)
+}
+```
+
+```{r}
+dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-03.Rds")
+```
+
+```{r}
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1, sep = "\t")
+files.gene <- file.path(metadata$directory, rownames(metadata), "quant.genes.sf")
+files.gene.samples <- str_split_fixed(files.gene, pattern = "/", n = 11)[,10]
+files.gene.outliers.removed <- files.gene[files.gene.samples %in% colnames(dds.ensg.remove.outliers.batch.corrected)]
+sample.names.outliers.removed <- files.gene.samples[files.gene.samples %in% colnames(dds.ensg.remove.outliers.batch.corrected)]
+```
+
+```{r}
+genes.effective.lengths <- lapply(files.gene.outliers.removed, read_in_quant_genes)
+length(genes.effective.lengths)
+
+genes.effective.lengths.list <- list()
+for (i in 1:length(genes.effective.lengths)){
+  df <- genes.effective.lengths[[i]]
+  colnames(df)[2] <- sample.names.outliers.removed[i]
+  genes.effective.lengths.list[[i]] <- df
+}
+
+```
+
+```{r}
+genes.effective.lengths.df <- genes.effective.lengths.list %>% purrr::reduce(inner_join, by = "Name")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+                #host="uswest.ensembl.org")
+tx2gene.ensg <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+colnames(tx2gene.ensg)[2] <- "Name"
+genes.effective.lengths.df.hgnc <- left_join(genes.effective.lengths.df, tx2gene.ensg,by = "Name")
+```
+
+```{r}
+df.dds.ensg.remove.outliers.batch.corrected <- assay(dds.ensg.remove.outliers.batch.corrected)[2:nrow(assay(dds.ensg.remove.outliers.batch.corrected)),]
+dim(df.dds.ensg.remove.outliers.batch.corrected)
+```
+
+```{r}
+rownames(genes.effective.lengths.df) <- NULL
+genes.effective.lengths.df.filtered <- genes.effective.lengths.df[which(genes.effective.lengths.df$Name %in% rownames(df.dds.ensg.remove.outliers.batch.corrected)),]
+dim(genes.effective.lengths.df.filtered)
+df.dds.ensg.remove.outliers.batch.corrected.matched <- df.dds.ensg.remove.outliers.batch.corrected[genes.effective.lengths.df.filtered$Name,]
+```
+
+```{r}
+rownames(genes.effective.lengths.df.filtered) <- genes.effective.lengths.df.filtered$Name
+genes.effective.lengths.df.filtered$Name <- NULL
+df.dds.ensg.remove.outliers.batch.corrected.matched <- data.frame(df.dds.ensg.remove.outliers.batch.corrected.matched)
+genes.effective.lengths.df.filtered[1:5,1:5]
+df.dds.ensg.remove.outliers.batch.corrected.matched[1:5,1:5]
+```
+
+```{r}
+tpm.out <- tpm.convert(counts.mat =df.dds.ensg.remove.outliers.batch.corrected.matched, gene.length = genes.effective.lengths.df.filtered )
+tpm.out[1:5,1:5]
+```
+
+```{r TPM data for mixture matrix}
+tpm.out.mixture <- data.frame(tpm.out[,which(colData(dds.ensg.remove.outliers.batch.corrected)$Study == "InHouse")])
+tpm.out.mixture.genes <- tibble::rownames_to_column(tpm.out.mixture, "genes")
+tpm.out.mixture.genes[1:5,1:5]
+tpm.out.mixture.genes.outfile <- paste("intermediate_files/cibersort/caf_tpm_mixture_engs_version_batch_corrected_", Sys.Date(), ".txt", sep = "")
+#write.table(x = tpm.out.mixture.genes, file = here(tpm.out.mixture.genes.outfile), sep = "\t", quote = F, row.names = F)
+```
+
+```{r TPM data for signature matrix}
+# signature is our non-inhouse
+tpm.out.signature <- tpm.out[,which(dds.ensg.remove.outliers.batch.corrected$Study != "InHouse")]
+colnames(tpm.out.signature) <- dds.ensg.remove.outliers.batch.corrected$Subpopulation[which(dds.ensg.remove.outliers.batch.corrected$Study != "InHouse")]
+tpm.out.signature[1:5,1:5]
+```
+
+```{r}
+s1_cols <- which(colnames(tpm.out.signature) == "S1")
+s3_cols <- which(colnames(tpm.out.signature) == "S3")
+s4_cols <- which(colnames(tpm.out.signature) == "S4")
+
+s1_cols_length <- length(s1_cols)
+s3_cols_length <- length(s3_cols)
+s4_cols_length <- length(s4_cols)
+```
+
+```{r Put signature data in the right order ie all the S1s together etc}
+tpm.data.no.inhouse.order <- cbind.data.frame(rownames(tpm.out.signature),
+                                              tpm.out.signature[,s1_cols],
+                                              tpm.out.signature[,s3_cols],
+                                              tpm.out.signature[,s4_cols]
+                                              )
+colnames(tpm.data.no.inhouse.order) <- NULL
+rownames(tpm.data.no.inhouse.order) <- NULL
+cols_no_inhouse <- c("genes", rep("S1", s1_cols_length), rep("S3", s3_cols_length), rep("S4", s4_cols_length))
+tpm.data.no.inhouse.order <- rbind.data.frame(cols_no_inhouse, tpm.data.no.inhouse.order)
+tpm.data.no.inhouse.order[1:5,1:5]
+tpm.data.no.inhouse.order.outfile <- paste("intermediate_files/cibersort/caf_tpm_for_signature_engs_version_batch_corrected_", Sys.Date(), ".txt", sep = "")
+#write.table(tpm.data.no.inhouse.order, file = here(tpm.data.no.inhouse.order.outfile), sep = "\t", quote = F, row.names = F, col.names = F)
+```
+
+
+
+```{r create phenoclasses file}
+S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
+S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
+S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
+
+
+if (length(S1) != length(colnames(tpm.out.signature))){
+  stop("length s1 row incorrect")
+} else if (length(S3) != length(colnames(tpm.out.signature))) {
+  stop("length s3 row incorrect")
+} else if (length(S4) != length(colnames(tpm.out.signature))) {
+  stop("length s4 row incorrect")
+}
+
+out <- rbind.data.frame(S1, S3, S4)
+colnames(out) <- NULL
+row.names(out) <- c("S1", "S3", "S4")
+outfile.name <-  paste("intermediate_files/cibersort/phenoclasses_caf_", Sys.Date(), ".txt", sep = "")
+#write.table(out, file = here(outfile.name), sep = "\t", quote = F, col.names = F)
+```
+
+## CIBERSORT results
+### CIBERSORT results online
+
+```{r}
+cibersort_output <- read.csv(here("intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv"))
+cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
+```
+
+```{r}
+cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
+cibersort_plot_online <- ggplot(cibersort_results_long_online, 
+                                aes(x = as.character(Mixture), y = value, fill = Subpopulation)) +
+  geom_col() + 
+  ggtitle("CIBERSORT results online") +   
+  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
+  xlab("Mixture") + 
+  ylab("Proportion") +
+  theme(#panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black")) +
+      scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
+```
+
+```{r}
+cibersort_plot_online
+```
+
+```{r}
+outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".png", sep = "")
+#ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online)
+```
+
+### CIBERSORT results docker
+
+```{r}
+cibersort_output_docker <- read.table(here("intermediate_files/cibersort/outputs/CIBERSORTx_Results.txt"), header = T)
+cibersort_output_docker$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output_docker$Mixture)
+```
+
+```{r}
+cibersort_results_long_docker <- pivot_longer(cibersort_output_docker, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_docker$Mixture <- as.character(cibersort_results_long_docker$Mixture)
+cibersort_plot_docker <- ggplot(cibersort_results_long_docker, 
+                                aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) +
+  geom_col() + 
+  ggtitle("CIBERSORT results Docker") +   
+  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
+  xlab("Mixture") + 
+  ylab("Proportion") +
+  theme(#panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black")) +
+      scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
+```
+
+```{r}
+cibersort_plot_docker
+```
+
+```{r}
+outfile.plot.name.docker <-  paste("outfiles/cibersort_results_docker_", Sys.Date(), ".png", sep = "")
+#ggsave(filename = here(outfile.plot.name.docker), plot = cibersort_plot_docker)
+```
+
+```{r, include = FALSE}
+legend <- get_legend(
+  # create some space to the left of the legend
+  cibersort_plot_docker + 
+    theme(legend.box.margin = margin(0, 0, 0, 12),
+          legend.key.size = unit(0.5, 'cm'),
+          legend.key.height = unit(0.5, 'cm'),
+          legend.key.width = unit(0.5, 'cm'),
+          legend.title = element_text(size=8),
+          legend.text = element_text(size=8)
+          )
+)
+cibersort_grid <- plot_grid(cibersort_plot_online + theme(legend.position = "none"),
+                            cibersort_plot_docker + theme(legend.position = "none"),
+                             ncol = 2,
+      labels = c('A', 'B'),
+      label_fontfamily = 'serif',
+      label_fontface = 'bold',
+      label_size = 15,
+      align = 'h')
+cibersort_grid <- plot_grid(cibersort_grid, legend, rel_widths = c(3,.5))
+
+ggsave(filename = here("outfiles/cibersort_plot_batch_corrected_2022-10-03.png"), 
+       plot = cibersort_grid,
+       width = 20,
+       height = 10,
+       units = "cm")
+```
+
+```{r CIBERSORT plots}
+cibersort_grid
+```

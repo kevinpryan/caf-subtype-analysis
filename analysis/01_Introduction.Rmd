@@ -1,0 +1,53 @@
+---
+title: "CAF Subpopulation Analysis"
+output: github_document
+bibliography: citations.bib  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the tumour microenvironment. They have a wide array of functions, and tend to be immunosuppressive and cancer-promoting. There have been many attempts to characterise subpopulations of CAFs, with much transcriptomic analysis being carried out in the Mechta-Grigoriou lab in Institut Curie. They have identified 4 'subpopulations' which can be separated based on the expression of different markers:
+
+ -  S1: FAP^High^, CD29^Med-High^, α^SMAHigh^, PDPN^High^, PDGFRβ^High^
+ -  S2: FAP^Neg^, CD29^Low^, αSMANeg-^Low^, PDPN^Low^, PDGFRβ^Low^
+ -  S3: FAP^Neg-Low^, CD29^Med^, αSMA^Neg-Low^, PDPN^Low^, PDGFRβ^Low-Med^
+ -  S4: FAP^Low-Med^, CD29^High^, αSMA^High^, PDPN^Low^, PDGFRβ^Med^
+
+[@Pelon2020]
+
+FACS gating strategies can be used to isolate these subpopulations. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated scRNA-sequencing data for the S1 subpopulation. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
+
+The following summarises the data obtained:
+
++---------------+---------------+-----------------------+-------------------------------+
+| Subpopulation | Total samples | Studies (Samples)     |  Notes                        |
++===============+===============+=======================+===============================+
+| S1            |  28           | - EGAD00001003808 (16)| -  3808 has 12xJuxta-tumor    |
+|               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
+|               |               | - EGAD00001006144 (7) | -  Sorting vs spreading       |
++---------------+---------------+-----------------------+-------------------------------+
+| S2            | 0             | N/A                   | N/A                           |
+|               |               |                       |                               |
++---------------+---------------+-----------------------+-------------------------------+
+| S3            | 14            | - EGAD00001004810 (14)| -  4810 has 11xJuxta-tumor    |
+|               |               |                       | -  Ovarian                    |
++---------------+---------------+-----------------------+-------------------------------+
+| S4            | 15            | - EGAD00001003808 (10)| -  3808 has 9xJuxta-tumor     |
+|               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
++---------------+---------------+-----------------------+-------------------------------+
+
+With the juxta-tumour data, tumour and juxta-tumour samples came from the same patient. However, the metadata gives no indication of these pairings. We could possibly use Optitype [@Szolek2014] to determine HLA allele and match the tumour and juxta-tumour samples.
+
+We also have scRNA-seq data for S1, labelled with 8 subpopulations of S1 CAFs. It may be possible to use CIBERSORT [@Newman2015] and BayesPrism [@Chu2022] to deconvolve the bulk S1 RNA-sequencing data to further confirm the presence of these subpopulations.
+
+It is likely that sorting the cells using FACS alters the transcriptional properties of the cells compared to if they are separated using spreading approaches, as is seen in study `EGAD00001006144` and described in [@Kieffer2020]. This is something that we will have to keep in mind.
+
+The data was processed using nf-core/rnaseq version `3.8.1` using the default parameters. STAR/Salmon were used for alignment/quantification.
+
+We would expect our tumour-associated normal to be most like the S3 subpopulation (usually accumulate in juxta-tumours). The S2 subpopulation has been found to accumulate more in luminal A breast cancer, whereas the S4 subpopulation tends to be present in Her2+ breast cancers. Unfortunately, data is not available for the S2 subpopulation and 11 of the 12 cancers encountered in our samples are Luminal A.
+
+Combining RNA-sequencing datasets from different studies can be very challenging. We can expect batch effects to be present, so it might not be possible to determine whether differences we observe are due to actual biological effects or technical artifacts. In addition, a recent study suggests that DESeq2 and edgeR (the most popular differential expression tools) experience large rates of false positives when used with large sample sizes [@Li2022]. However, this assertion has been refuted, and it has been implied that the Li 2022 study did not apply appropriate batch correction and quality control ([Twitter thread](https://threadreaderapp.com/thread/1513468597288452097.html) from Mike Love and associated [code on GitHub](https://github.com/mikelove/preNivolumabOnNivolumab/blob/main/preNivolumabOnNivolumab.knit.md)). One of the datasets (`EGAD00001006144`) was produced using stranded RNA-seq, whereas the other datasets were unstranded. This can lead to a lack of comparability of the datasets [@Zhao2020]. It may be necessary to drop this dataset from the analysis. All samples were prepared by poly(A) selection (use of oligo-dT).
