@@ -1,0 +1,1200 @@
+---
+title: "CAF subpopulation analysis 23/09/2022"
+author: "Kevin Ryan"
+date: "9/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Cancer-associated fibroblasts (CAFs) are a heterogeneous cell type found in the tumour microenvironment. They have a wide array of functions, and tend to be immunosuppressive and cancer-promoting. There have been many attempts to characterise subpopulations of CAFs, with much transcriptomic analysis being carried out in the Mechta-Grigoriou lab in Institut Curie. They have identified 4 'subpopulations' which can be separated based on the expression of different markers:
+
+ -  S1: FAP^High^, CD29^Med-High^, α^SMAHigh^, PDPN^High^, PDGFRβ^High^
+ -  S2: FAP^Neg^, CD29^Low^, αSMANeg-^Low^, PDPN^Low^, PDGFRβ^Low^
+ -  S3: FAP^Neg-Low^, CD29^Med^, αSMA^Neg-Low^, PDPN^Low^, PDGFRβ^Low-Med^
+ -  S4: FAP^Low-Med^, CD29^High^, αSMA^High^, PDPN^Low^, PDGFRβ^Med^
+
+[@Pelon2020]
+
+FACS gating strategies can be used to isolate these subpopulations. The Mechta-Grigoriou group have done this and have generated bulk RNA-sequencing data for the S1, S3 and S4 subpopulations. They generated scRNA-sequencing data for the S1 subpopulation. This data was deposited on the European Genome Phenome Archive, and was accessed via a Data Transfer Agreement.
+
+The following summarises the data obtained:
+
++---------------+---------------+-----------------------+-------------------------------+
+| Subpopulation | Total samples | Studies (Samples)     |  Notes                        |
++===============+===============+=======================+===============================+
+| S1            |  28           | - EGAD00001003808 (16)| -  3808 has 12xJuxta-tumor    |
+|               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
+|               |               | - EGAD00001006144 (7) | -  Sorting vs spreading       |
++---------------+---------------+-----------------------+-------------------------------+
+| S2            | 0             | N/A                   | N/A                           |
+|               |               |                       |                               |
++---------------+---------------+-----------------------+-------------------------------+
+| S3            | 14            | - EGAD00001004810 (14)| -  4810 has 11xJuxta-tumor    |
+|               |               |                       | -  Ovarian                    |
++---------------+---------------+-----------------------+-------------------------------+
+| S4            | 15            | - EGAD00001003808 (10)| -  3808 has 9xJuxta-tumor     |
+|               |               | - EGAD00001005744 (5) | -  5744 5 samples from LN     |
++---------------+---------------+-----------------------+-------------------------------+
+
+With the juxta-tumour data, tumour and juxta-tumour samples came from the same patient. However, the metadata gives no indication of these pairings. We could possibly use Optitype [@Szolek2014] to determine HLA allele and match the tumour and juxta-tumour samples.
+
+We also have scRNA-seq data for S1, labelled with 8 subpopulations of S1 CAFs. It may be possible to use CIBERSORT [@Newman2015] and BayesPrism [@Chu2022] to deconvolve the bulk S1 RNA-sequencing data to further confirm the presence of these subpopulations.
+
+It is likely that sorting the cells using FACS alters the transcriptional properties of the cells compared to if they are separated using spreading approaches, as is seen in study `EGAD00001006144` and described in [@Kieffer2020]. This is something that we will have to keep in mind.
+
+The data was processed using nf-core/rnaseq version `3.8.1` using the default parameters. STAR/Salmon were used for alignment/quantification.
+
+We would expect our tumour-associated normal to be most like the S3 subpopulation (usually accumulate in juxta-tumours). The S2 subpopulation has been found to accumulate more in luminal A breast cancer, whereas the S4 subpopulation tends to be present in Her2+ breast cancers. Unfortunately, data is not available for the S2 subpopulation and 11 of the 12 cancers encountered in our samples are Luminal A.
+
+Combining RNA-sequencing datasets from different studies can be very challenging. We can expect batch effects to be present, so it might not be possible to determine whether differences we observe are due to actual biological effects or technical artifacts. In addition, a recent study suggests that DESeq2 and edgeR (the most popular differential expression tools) experience large rates of false positives when used with large sample sizes [@Li2022]. However, this assertion has been refuted, and it has been implied that the Li 2022 study did not apply appropriate batch correction and quality control ([Twitter thread](https://threadreaderapp.com/thread/1513468597288452097.html) from Mike Love and associated [code on GitHub](https://github.com/mikelove/preNivolumabOnNivolumab/blob/main/preNivolumabOnNivolumab.knit.md)). One of the datasets (`EGAD00001006144`) was produced using stranded RNA-seq, whereas the other datasets were unstranded. This can lead to a lack of comparability of the datasets [@Zhao2020]. It may be necessary to drop this dataset from the analysis. All samples were prepared by poly(A) selection (use of oligo-dT).
+
+# Preparation
+
+Columns will be: Sample, Study, Subpopulation, Tumor_Juxtatumor
+
+*Here we will be combining data from 5 studies. To begin with, we will only include the metadata available for all studies (except for our unknown CAF Subpopulation label). Breast cancer subtype is only available for certain studies and so is not included at this stage.*
+
+There are also: ovarian cancer samples, EPCAM+ cells (an epithelial marker) and samples from lymph nodes. For the time being, I will not consider them.
+
+```{r load packages, include = FALSE}
+library(dplyr)
+library(stringr)
+library(biomaRt)
+library(tximport)
+library(DT)
+library(tidyverse)
+library(ggplot2)
+library(cowplot)
+library(PCAtools)
+library(dplyr)
+library(SummarizedExperiment)
+library(DESeq2)
+library(pheatmap)
+library(RColorBrewer)
+library(glmpca)
+library(hexbin)
+library(IHW)
+library(sva)
+library(ggpubr)
+library(vsn)
+httr::set_config(httr::config(ssl_verifypeer = FALSE))
+library(tximeta)
+library(BiocParallel)
+library(ashr)
+library(GSVA)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(HGNChelper)
+source("scripts/functions_caf_subpopulation_analysis.R")
+library(here)
+library(MLSeq)
+```
+
+# Read in data
+
+Samples were processed with nf-core/rnaseq version `3.8.1`.
+
+Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
+
+```{r Prepare to read in data, include = FALSE}
+# metadata file created with create_metadata.R
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1, sep = "\t")
+metadata_no_inhouse <- read.table(here("intermediate_files/metadata/metadata_no_inhouse.txt"), row.names = 1, sep = "\t")
+metadata_no_inhouse_no6144 <- read.table(here("intermediate_files/metadata/metadata_no_inhouse_without_6144.txt"), row.names = 1, sep = "\t")
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
+                      Subpopulation = metadata$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+
+# tx2gene but using the hgnc symbol instead of ensembl gene id version
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+                #host="uswest.ensembl.org")
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+```
+
+```{r Read in data}
+# salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
+# txOut = FALSE means to summarise to gene level (i.e. don't give out transcripts, give out gene level)
+se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+```
+```{r read in data without inhouse data, include = FALSE}
+files_no_inhouse <- file.path(metadata_no_inhouse$directory, rownames(metadata_no_inhouse), "quant.sf")
+coldata_no_inhouse <- data.frame(files = files_no_inhouse, names=rownames(metadata_no_inhouse), Study = metadata_no_inhouse$Study, 
+                      Subpopulation = metadata_no_inhouse$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata_no_inhouse$Tumor_JuxtaTumor,
+                      Strandedness = metadata_no_inhouse$Strandedness,
+                      stringsAsFactors=FALSE)
+# tx2gene file for the gencode v31 file used in the analysis
+se_no_inhouse <- tximeta(coldata = coldata_no_inhouse, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+```
+
+A DESeqDataSet was created, and only genes with a count of 10 or more in 7 samples were kept for further analysis. This was done for the combined dataset both with and without the in-house data. A variance stabilising transformation (vst) was also carried out to allow the data to be used in downstream processes requiring homoskedastic data, e.g. PCA. *vst* was carried out instead of regularised logarithm (*rlog*) as *rlog* takes a long time to run when there is a large sample size.  
+
+```{r Carry out all steps up to vsd step for se_hgnc}
+dds <- DESeqDataSet(se, design = ~1)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds <- dds[keep,]
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds))
+#X <- 7
+keep <- rowSums(counts(dds) >= 10) >= X
+dds <- dds[keep,]
+vsd <- vst(dds, blind = TRUE)
+```
+
+```{r Apply common filters according to DESeq2 vignette to remove lowly expressed genes}
+# do no design for the time being, Subpopulation + Batch gives error - model matrix not full rank in DESeq2
+# this function stores input values, intermediate calculations and results of DE analysis - makes counts non-negative integers
+dds_no_inhouse <- DESeqDataSet(se_no_inhouse, design = ~1)
+
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds_no_inhouse)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds_no_inhouse <- dds_no_inhouse[keep,]
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds_no_inhouse))
+#X <- 7
+keep <- rowSums(counts(dds_no_inhouse) >= 10) >= X
+dds_no_inhouse <- dds_no_inhouse[keep,]
+```
+
+# Exploratory data analysis
+
+## PCA + clinical correlations all studies
+
+For consistency between the DESeq2 `plotPCA` function (which by default takes the 500 most variable genes) and the PCATools `pca` function, all genes were used when carrying out PCA.
+
+```{r}
+plotPCA(vsd, intgroup = c("Subpopulation"), ntop = nrow(vsd))
+pca_study <- plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd))
+pca_study
+plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd))
+
+```
+
+```{r}
+ggsave(filename = "outfiles/pca_colour_by_study_before_batch_correction.png", plot = pca_study)
+```
+
+There seems to be 4 groups of samples here: the samples at PC1 < -100 which look like outliers, the main group in the middle (-100 < PC1 < 50) and then 2 groups which separate on PC2. One of these groups comes completely from one batch (EGAD00001005744) which is purely tumour CAFs and the other is a mixture of our in-house samples and study EGAD00001006144. There is clear separation between the in-house samples and EGAD00001006144, so perhaps they could be called one cluster. The in-house samples underwent culturing in a medium to promote the growth of fibroblastic cells, whereas the EGAD00001006144 samples either underwent separation by sorting or spreading. It is possible that there are similarities in the conditions under which the samples were kept which altered their transcriptomic properties.
+
+We can see that there are 16 samples that explain much of the variation in PC1, meaning that they are quite different from the other samples. Let's have a look at the PCA loadings using the `biplot` from `PCATools`.
+
+It is important to note here that our interpretation of the PCA is subjective, and can change depending on the number of highly variable genes we consider when carrying out PCA.
+
+
+```{r Variance stabilising transformation and PCA on full dataset}
+vsd_mat <- assay(vsd)
+metadata_pca <- metadata[,1:4]
+p <- pca(vsd_mat, metadata = metadata_pca)
+```
+
+
+```{r Biplot}
+biplot(p, showLoadings = T, lab = NULL)
+```
+
+There seems to be 10 genes that are associated with PC2, separating our main cluster and the In-house/EGAD00001006144. samples.
+
+* FOS
+  + Proto-oncogene, forms part of TF complex, regulators of cell proliferation, differentiation, transformation, apoptosis.
+* APOD
+  + Apolipoprotein D, encodes part of HDL
+  + Expression induced in quiescent/senescent fibroblasts [@Rassart2020], and so may inhibit cell growth
+  + Downregulated in CAFs in our initial CAF vs TAN DE analysis
+* TMEM176B
+  + A transmembrane protein
+  + Identified as LR8 in 1999 [@Lurton1999] and was proposed as a marker for fibroblasts and their subpopulations.
+  + It has recently been found to be important in the AKT/mTOR pathway, which is involved in cell proliferation (and hence can be implicated in cancer) [@Kang2021].
+* SELENOP
+  + Selenoprotein P
+  + Increased expression stops conversion of fibroblasts to myofibroblasts [@Short2017]
+* PLXDC1
+  + Plexin Domain Containing 1
+  + Involved in angiogenesis
+  + Cell surface receptor for Pigment Epithelium Derived Factor [@Cheng2014]
+* P4HB
+  + Protein disulfide isomerase
+  + Possible fibroblast marker [@Wetzig2013]
+* CHPF
+  + Chondroitin polymerising factor
+  + Alters the formation of chondroitin sulphate in breast cancer. Chondroitin sulphate forms "abnormal" chains in breast cancer [@Liao2021]
+* CEMIP
+  + Cell Migration Inducing Hyaluronidase 1
+  + WNT-related [@Dong2021]
+  + High expression associated with malignancy and increased CAF infiltration [@Dong2021]. Possible biomarker. Dong study looked at expression in tumour cells, here we can see that its expression seems to change between different groups of CAFs too.
+* TFPI2
+  + Tissue factor pathway inhibitor 2.
+  + Serine proteinase
+  + Tumour suppressor
+  + Inhibits plasmin, thereby inhibiting the activation of MMPs
+  + Increased expression of TFPI2 in cancer cells downregulates the expression of MMPs in CAFs (the opposite is the case too) [@Gaud2011].
+* GREM1
+  + Antagonist of BMP, playing a role in tissue differentiation.
+  + Expressed in basal cell carcinoma CAF myofibroblasts [@Kim2017].
+  + Expression of GREM1 derived from CAFs thought to promote cancer progression [@Ren2019].
+  + Found to be expressed in CAF cell lines but not in breast cancer cell lines [@Ren2019].
+  + Its expression in bulk tumour samples is correlated with the expression of CAF markers such as FAP [@Ren2019].
+
+Let's plot the biplot again, but this time colour it by expression of a few of these markers
+
+```{r}
+ # add ESR1 gene expression to the metadata
+p$metadata$APOD <- vsd_mat['APOD',]
+p$metadata$SELENOP <- vsd_mat['SELENOP',]
+p$metadata$CEMIP <- vsd_mat['CEMIP',]
+p$metadata$GREM1 <- vsd_mat['GREM1',]
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'APOD',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'SELENOP',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'CEMIP',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'GREM1',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+```
+
+```{r}
+ # add marker gene expression to the metadata
+p$metadata$FAP <- vsd_mat['FAP',]
+# ITGB1 == CD29
+p$metadata$ITGB1 <- vsd_mat['ITGB1',]
+# ACTA2 == alphaSMA
+p$metadata$ACTA2 <- vsd_mat['ACTA2',]
+p$metadata$PDPN <- vsd_mat['PDPN',]
+p$metadata$PDGFRB <- vsd_mat['PDGFRB',]
+
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'FAP',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'ITGB1',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'ACTA2',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'PDPN',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+
+biplot(p,
+    x = 'PC1', y = 'PC2',
+    lab = NULL,
+    colby = 'PDGFRB',
+    shape = 'Study',
+    hline = 0, vline = 0,
+    legendPosition = 'right') +
+
+  scale_colour_gradient(low = 'gold', high = 'red2')
+```
+
+This would be nice to have as a Shiny App as well as plots of the expression of the genes.
+
+
+```{r}
+biplot(p,  lab = NULL, colby = "Subpopulation", legendPosition = "right")
+biplot(p,  lab = NULL, colby = "Study", legendPosition = "right")
+```
+
+## Clinical correlations
+
+```{r, include = FALSE}
+
+peigencor <- eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+```{r}
+peigencor
+```
+
+This shows batch effects
+
+## Outlier removal and batch correction
+
+Outliers were removed and batch correction was carried out using `remove_outliers_combat_seq.R`
+
+Here we read in the batch-corrected data, and correct the sample names to make them syntactically valid (MLSeq doesn't like having "-" in sample names)
+
+```{r}
+dds_batch_corrected_outliers_removed <- readRDS("intermediate_files/dds_batch_corrected_group_tumor_2022-09-15.Rds")
+new_names <- make.names(colnames(dds_batch_corrected_outliers_removed), unique = FALSE, allow_ = TRUE)
+colnames(dds_batch_corrected_outliers_removed) <- new_names
+colData(dds_batch_corrected_outliers_removed)$names <- new_names
+vsd_batch_corrected_outliers_removed <- vst(dds_batch_corrected_outliers_removed, blind = TRUE)
+vsd_mat_2 <- assay(vsd_batch_corrected_outliers_removed)
+```
+
+```{r}
+meanSdPlot(assay(dds_batch_corrected_outliers_removed))
+meanSdPlot(vsd_mat_2)
+```
+
+```{r}
+p2 <- pca(vsd_mat_2, metadata = colData(vsd_batch_corrected_outliers_removed))
+```
+
+```{r}
+biplot(p2, showLoadings = F, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+biplot(p2, showLoadings = T, lab = NULL)
+```
+
+```{r, include = FALSE}
+
+peigencor <- eigencorplot(p2,
+    components = getComponents(p2, 1:10),
+    metavars = colnames(colData(vsd_batch_corrected_outliers_removed))[2:4],
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations\nafter batch correction',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+peigencor
+```
+
+```{r}
+png(filename = "outfiles/eigencorplot_after_batch_correction.png", width = 480, height = 340)
+peigencor
+dev.off()
+```
+
+# Clustering
+
+
+```{r Heatmap by CAF genes}
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+genes_interest_common_names <- c("FAP", "CD29", "αSMA", "PDPN", "PDGFRB")
+genes_interest_vst <- assay(vsd_batch_corrected_outliers_removed)[genes_interest,]
+sampleDists <- dist(t(genes_interest_vst))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+metadata_pca_caf_genes <- colData(vsd_batch_corrected_outliers_removed)
+p_caf_genes <- pca(sampleDistMatrix, metadata = metadata_pca_caf_genes)
+biplot(p_caf_genes, showLoadings = T, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+p_caf_genes <- pca(sampleDistMatrix, metadata = metadata_pca_caf_genes)
+biplot(p_caf_genes, showLoadings = T, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+
+```
+
+```{r}
+biplot_subpop <- biplot(p_caf_genes, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+biplot_study <- biplot(p_caf_genes, lab = NULL, colby = "Study", legendPosition = "right")
+ggsave(filename = "outfiles/biplot_after_batch_correction_subpopulation.png", biplot_subpop)
+ggsave(filename = "outfiles/biplot_after_batch_correction_study.png", biplot_study)
+
+```
+
+## Application of classification algorithms
+
+I will use the R package MLSeq, which is designed for the application of ML algorithms to RNA-sequencing data.
+
+I will split my batch-corrected data into 2 objects, one of which has the labelled data (known subpopulation), and the other one with the unlabelled data (unknown subpopulation).
+
+```{r}
+data_df <- assay(dds_batch_corrected_outliers_removed)[2:nrow(assay(dds_batch_corrected_outliers_removed)),] 
+labelled <- which(dds_batch_corrected_outliers_removed$Subpopulation != "Unknown")
+unlabelled <- which(dds_batch_corrected_outliers_removed$Subpopulation == "Unknown")
+#dd_batch_corrected_outliers_removed_labelled <- dds_batch_corrected_outliers_removed[,labelled]
+#dds_batch_corrected_outliers_removed_unlabelled <- dds_batch_corrected_outliers_removed[,unlabelled]
+df_batch_corrected_outliers_removed_labelled <- data_df[,labelled]
+df_batch_corrected_outliers_removed_unlabelled <- data_df[,unlabelled]
+```
+
+```{r Create dataframe with data classes}
+metadata_labelled <- colData(dds_batch_corrected_outliers_removed)[labelled,]
+metadata_unlabelled <- colData(dds_batch_corrected_outliers_removed)[unlabelled,]
+#class <- DataFrame(Sample = metadata_labelled$names, Class = metadata_labelled$Subpopulation)
+class <- DataFrame(Class = factor(metadata_labelled$Subpopulation))
+                   #, row.names = metadata_labelled$names)
+```
+
+```{r Do train test split}
+set.seed(2128)
+nTest <- ceiling(ncol(df_batch_corrected_outliers_removed_labelled) * 0.3)
+ind <- sample(ncol(df_batch_corrected_outliers_removed_labelled), nTest, FALSE)
+
+data.train <- as.matrix(df_batch_corrected_outliers_removed_labelled[ ,-ind] + 1)
+data.test <- as.matrix(df_batch_corrected_outliers_removed_labelled[ ,ind] + 1)
+
+classtr <- DataFrame(Class = class[-ind, ])
+classts <- DataFrame(Class = class[ind, ])
+```
+
+```{r Create DESeq objects}
+data.trainS4 = DESeqDataSetFromMatrix(countData = data.train, colData = classtr, design = formula(~Class))
+data.testS4 = DESeqDataSetFromMatrix(countData = data.test, colData = classts, design = formula(~Class))
+```
+
+```{r}
+# Support Vector Machines with Radial Kernel
+#fit <- classify(data = data.trainS4, method = "svmRadial", preProcessing = "deseq-logcpm", ref = "S1", control = trainControl(method = "repeatedcv", number = 2, repeats = 2, classProbs = TRUE))
+# random Forest (RF) Classification
+ rf <- classify(data = data.trainS4, method = "rf",
+         preProcessing = "deseq-vst", #ref = "T",
+         control = trainControl(method = "repeatedcv", number = 5,
+                                repeats = 2, classProbs = TRUE))
+show(rf)
+```
+
+```{r}
+#Predicted class labels
+pred.rf <- predict(rf, data.testS4)
+pred.rf
+```
+
+```{r}
+pred.rf <- relevel(pred.rf, ref = "S1")
+actual <- relevel(classts$Class, ref = "S1")
+```
+
+```{r}
+tbl <- table(Predicted = pred.rf, Actual = actual)
+confusionMatrix(tbl, positive = "S1")
+```
+
+```{r Try a number of different algorithms}
+set.seed(2128)
+# Define control lists.
+ctrl.continuous <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+ctrl.discrete <- discreteControl(method = "repeatedcv", number = 5, repeats = 10,
+tuneLength = 10)
+ctrl.voom <- voomControl(method = "repeatedcv", number = 5, repeats = 10,
+tuneLength = 10)
+# 1. Continuous classifiers, SVM and NSC
+fit.svm <- classify(data = data.trainS4, method = "svmRadial",preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+fit.NSC <- classify(data = data.trainS4, method = "pam", preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+# 2. Discrete classifiers
+fit.plda <- classify(data = data.trainS4, method = "PLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+fit.plda2 <- classify(data = data.trainS4, method = "PLDA2", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+fit.nblda <- classify(data = data.trainS4, method = "NBLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+# 3. voom-based classifiers
+fit.voomDLDA <- classify(data = data.trainS4, method = "voomDLDA", normalize = "deseq", ref = "S1", control = ctrl.voom)
+fit.voomNSC <- classify(data = data.trainS4, method = "voomNSC", normalize = "deseq", ref = "S1", control = ctrl.voom)
+# 4. Predictions
+## continuous
+pred.svm <- predict(fit.svm, data.testS4)
+pred.NSC <- predict(fit.NSC, data.testS4)
+
+## discrete
+pred.plda <- predict(fit.plda, data.testS4)
+pred.plda2 <- predict(fit.plda2, data.testS4)
+pred.nblda <- predict(fit.nblda, data.testS4)
+
+## voom-based
+pred.voomDLDA <- predict(fit.voomDLDA, data.testS4)
+pred.voomNSC <- predict(fit.voomNSC, data.testS4)
+
+```
+
+```{r}
+confus_mat <- function(prediction, actual){
+  prediction <- relevel(prediction, ref = "S1")
+  #actual <- relevel(classts$Class, ref = "S1")
+  actual <- actual
+  tbl <- table(Predicted = prediction, Actual = actual)
+  return(confusionMatrix(tbl, positive = "S1"))
+}
+```
+
+```{r}
+confus_mat(pred.svm, actual)
+```
+
+## MLSeq with CAF marker genes
+
+```{r Get dds object with genes of interest}
+data.trainS4.caf.sig <- data.trainS4[genes_interest,]
+data.testS4.caf.sig <- data.testS4[genes_interest,]
+```
+
+```{r Try a number of different algorithms on genes of interest}
+set.seed(2128)
+# Define control lists.
+ctrl.continuous <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+ctrl.discrete <- discreteControl(method = "repeatedcv", number = 5, repeats = 10,
+tuneLength = 10)
+ctrl.voom <- voomControl(method = "repeatedcv", number = 5, repeats = 10,
+tuneLength = 10)
+# 1. Continuous classifiers, SVM and NSC
+fit.svm <- classify(data = data.trainS4.caf.sig, method = "svmRadial",preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+fit.NSC <- classify(data = data.trainS4.caf.sig, method = "pam", preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+# 2. Discrete classifiers
+fit.plda <- classify(data = data.trainS4.caf.sig, method = "PLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+fit.plda2 <- classify(data = data.trainS4.caf.sig, method = "PLDA2", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+fit.nblda <- classify(data = data.trainS4.caf.sig, method = "NBLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+# 3. voom-based classifiers
+fit.voomDLDA <- classify(data = data.trainS4.caf.sig, method = "voomDLDA", normalize = "deseq", ref = "S1", control = ctrl.voom)
+fit.voomNSC <- classify(data = data.trainS4.caf.sig, method = "voomNSC", normalize = "deseq", ref = "S1", control = ctrl.voom)
+# 4. Predictions
+## continuous
+pred.svm <- predict(fit.svm, data.testS4.caf.sig)
+pred.NSC <- predict(fit.NSC, data.testS4.caf.sig)
+
+## discrete
+pred.plda <- predict(fit.plda, data.testS4.caf.sig)
+pred.plda2 <- predict(fit.plda2, data.testS4.caf.sig)
+pred.nblda <- predict(fit.nblda, data.testS4.caf.sig)
+
+## voom-based
+pred.voomDLDA <- predict(fit.voomDLDA, data.testS4.caf.sig)
+pred.voomNSC <- predict(fit.voomNSC, data.testS4.caf.sig)
+
+```
+
+```{r}
+confus_mat(pred.nblda, actual)
+
+```
+
+```{r}
+df_batch_corrected_outliers_removed_unlabelled
+metadata_unlabelled
+dds_batch_corrected_outliers_removed_unlabelled <- DESeqDataSetFromMatrix(df_batch_corrected_outliers_removed_unlabelled, colData = metadata_unlabelled, design = ~1)
+data.inhouse.S4.caf.sig <- dds_batch_corrected_outliers_removed_unlabelled[genes_interest,]
+
+pred.svm.actual <- predict(fit.svm, data.inhouse.S4.caf.sig)
+pred.plda.actual <- predict(fit.plda, data.inhouse.S4.caf.sig)
+
+```
+
+```{r}
+pred.svm.actual
+pred.plda.actual
+```
+
+# Plot genes of interest
+
+```{r}
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB", "ATL1", "CAV1")
+genes_interest_common_names <- c("FAP", "CD29", "αSMA", "PDPN", "PDGFRB", "FSP1", "CAV1")
+genes_interest_vst <- assay(vsd_batch_corrected_outliers_removed)[genes_interest,]
+dds_batch_corrected_outliers_removed_marker_genes <- dds_batch_corrected_outliers_removed[genes_interest,]
+plotcounts_dfs <- list()
+for (i in 1:length(genes_interest)){
+  plotcounts_dfs[[i]] <- plotCounts(dds_batch_corrected_outliers_removed_marker_genes, 
+                                    gene=genes_interest[i], 
+                                    returnData = TRUE,
+                                    intgroup = c("Subpopulation", "Tumor_JuxtaTumor")
+                                    )
+}
+
+plots_out_tumor_juxtatumor <- list()
+for (i in 1:length(plotcounts_dfs)){
+  plt <- caf_plot_tumour_juxtatumour(df_for_plotting = plotcounts_dfs[[i]], 
+                                                                   gene = genes_interest_common_names[i])
+  plots_out_tumor_juxtatumor[[i]] = plt
+}
+```
+
+```{r}
+ggar_obj_tumor_juxtatumor <- ggarrange(plotlist = plots_out_tumor_juxtatumor, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_tumor_juxtatumor_annotated <- annotate_figure(ggar_obj_tumor_juxtatumor, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_tumor_juxtatumor_annotated
+```
+
+```{r}
+colData(dds_batch_corrected_outliers_removed)$Tumor_JuxtaTumor <- as.factor(colData(dds_batch_corrected_outliers_removed)$Tumor_JuxtaTumor)
+colData(dds_batch_corrected_outliers_removed)$Subpopulation <- as.factor(colData(dds_batch_corrected_outliers_removed)$Subpopulation)
+
+design(dds_batch_corrected_outliers_removed) <- ~ Tumor_JuxtaTumor + Subpopulation
+dds_batch_corrected_outliers_removed <- estimateSizeFactors(dds_batch_corrected_outliers_removed)
+normalised_counts <- counts(dds_batch_corrected_outliers_removed, normalized = TRUE)
+```
+
+sources for this plot: https://hbctraining.github.io/DGE_workshop/lessons/06_DGE_visualizing_results.html 
+https://github.com/hbctraining/DGE_workshop/blob/master/lessons/02_DGE_count_normalization.md
+
+```{r}
+normalised_counts <- normalised_counts %>% 
+  data.frame() %>%
+  rownames_to_column(var="gene") %>% 
+  as_tibble()
+# extract normalised counts of genes of interest
+genes_interest_norm <- normalised_counts %>%
+        filter(gene %in% genes_interest)
+```
+
+```{r}
+# Gathering the columns to have normalized counts to a single column
+genes_interest_norm$gene <- genes_interest_common_names
+gathered_genes_interest_norm <- genes_interest_norm %>%
+  pivot_longer(cols = colnames(genes_interest_norm)[2:ncol(genes_interest_norm)], names_to = "samplename")
+  
+metadata_for_plotting <- data.frame(samplename = colData(dds_batch_corrected_outliers_removed)$names, Subpopulation = colData(dds_batch_corrected_outliers_removed)$Subpopulation)
+mov10_meta <- metadata_for_plotting %>% 
+  as_tibble()
+gathered_genes_interest_norm_join <- inner_join(metadata_for_plotting, gathered_genes_interest_norm)
+
+```
+
+```{r}
+marker_genes_plot <- ggplot(gathered_genes_interest_norm_join) +
+        geom_point(aes(x = gene, y = value, color = Subpopulation),
+                   position = position_jitter(
+                 width = 0.15,  # amount of jitter in horizontal direction
+                 height = 0)) +
+        scale_y_log10() +
+        xlab("Genes") +
+        ylab("log10 Normalized Counts") +
+        ggtitle("CAF subpopulation marker genes") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+	theme(plot.title = element_text(hjust = 0.5))
+ggsave(filename = "outfiles/marker_gene_batch_corrected_expression_25092022.png", marker_genes_plot)
+```
+
+# Differential expression analysis
+
+```{r}
+dds_batch_corrected_outliers_removed2 <- readRDS("intermediate_files/dds_batch_corrected_group_tumor_2022-09-15.Rds")
+keep <- which(colData(dds_batch_corrected_outliers_removed2)$Subpopulation != "Unknown")
+dds_batch_corrected_outliers_removed_no_inhouse <- dds_batch_corrected_outliers_removed2[,keep]
+#design(dds_batch_corrected_outliers_removed_no_inhouse) <- ~ Tumor_JuxtaTumor + Subpopulation 
+dds_batch_corrected_outliers_removed_no_inhouse <- DESeq(dds_batch_corrected_outliers_removed_no_inhouse)
+normalised_counts_no_inhouse <- counts(dds_batch_corrected_outliers_removed_no_inhouse, normalized = TRUE)
+idx  <- rowMeans(normalised_counts_no_inhouse) > 1
+normalised_counts_no_inhouse  <- normalised_counts_no_inhouse[idx, ]
+# we have Subpopulation and tumour-juxtatomour in the model matrix
+mod  <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds_batch_corrected_outliers_removed_no_inhouse))
+mod0 <- model.matrix(~ 1, colData(dds_batch_corrected_outliers_removed_no_inhouse))
+svseq_no_inhouse <- svaseq(normalised_counts_no_inhouse, mod, mod0)
+```
+
+```{r}
+colData(dds_batch_corrected_outliers_removed_no_inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds_batch_corrected_outliers_removed_no_inhouse)$Tumor_JuxtaTumor)
+colData(dds_batch_corrected_outliers_removed_no_inhouse)$Subpopulation <- as.factor(colData(dds_batch_corrected_outliers_removed_no_inhouse)$Subpopulation)
+design(dds_batch_corrected_outliers_removed_no_inhouse) <- ~ Tumor_JuxtaTumor + Subpopulation
+```
+
+```{r}
+dds_no_inhouse_batch_corrected_deseq <- DESeq(dds_batch_corrected_outliers_removed_no_inhouse)
+```
+
+```{r Define model matrix}
+# define model matrix
+mod_mat <- model.matrix(design(dds_no_inhouse_batch_corrected_deseq), colData(dds_no_inhouse_batch_corrected_deseq))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation == "S1",])
+S3 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation == "S3",])
+S4 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation == "S4",])
+not_S1 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation %in% c("S3", "S4"),])
+not_S3 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation %in% c("S1", "S4"),])
+not_S4 <- colMeans(mod_mat[dds_no_inhouse_batch_corrected_deseq$Subpopulation %in% c("S1", "S3"),])
+```
+
+From the DESeq2 paper (thanks to Dónal for pointing it out) - the default null hypothesis with the `results` function is that the actual log fold change is exactly zero. This is not likely to be biologically significant. What we often do is extract genes with a lfc greater than a certain threshold, e.g. LFC >=2. However, there is a better way of doing this. We can incorporate our threshold into the test itself, i.e. we can test if the actual LFC is greater than or equal to 2, and then our adjusted P-values will be with respect to this new null hypothesis. 
+
+```{r Extract results for each pairwise contrast}
+res_not_S1 <- results(dds_no_inhouse_batch_corrected_deseq, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+res_not_S3 <- results(dds_no_inhouse_batch_corrected_deseq, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+res_not_S4 <- results(dds_no_inhouse_batch_corrected_deseq, contrast = S4 - not_S4, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+```
+
+```{r}
+length(which(res_not_S1$padj < 0.1))
+```
+
+```{r}
+dds_batch_corrected_outliers_removed_svseq <- dds_batch_corrected_outliers_removed_no_inhouse
+sv_names <- paste("SV", seq(1,svseq_no_inhouse$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+  colData(dds_batch_corrected_outliers_removed_svseq)[,sv_names[i]] <- svseq_no_inhouse$sv[,i]
+}
+design(dds_batch_corrected_outliers_removed_svseq) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 +SV19 + SV20 + SV21 + SV22 + Subpopulation
+```
+
+
+```{r}
+#register(MulticoreParam(4))
+#ptm <- proc.time()
+#dds_no_inhouse_batch_corrected_deseq_svseq <- DESeq(dds_batch_corrected_outliers_removed_svseq, parallel = TRUE)
+#proc.time() - ptm
+#write_rds(dds_no_inhouse_batch_corrected_deseq_svseq, file = "outfiles/dds_no_inhouse_batch_corrected_deseq_svseq_25-09-2022.Rds")
+dds_no_inhouse_batch_corrected_deseq_svseq <- readRDS("outfiles/dds_no_inhouse_batch_corrected_deseq_svseq_25-09-2022.Rds")
+```
+
+```{r Define model matrix svseq}
+# define model matrix
+mod_mat_sv <- model.matrix(design(dds_batch_corrected_outliers_removed_svseq), colData(dds_batch_corrected_outliers_removed_svseq))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation == "S1",])
+S3_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation == "S3",])
+S4_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation == "S4",])
+not_S1_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation %in% c("S3", "S4"),])
+not_S3_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation %in% c("S1", "S4"),])
+not_S4_sv <- colMeans(mod_mat_sv[dds_no_inhouse_batch_corrected_deseq_svseq$Subpopulation %in% c("S1", "S3"),])
+```
+
+```{r Extract results for each pairwise contrast svseq}
+res_not_S1_sv <- results(dds_no_inhouse_batch_corrected_deseq_svseq, contrast = S1_sv - not_S1_sv, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+res_not_S3_sv <- results(dds_no_inhouse_batch_corrected_deseq_svseq, contrast = S3_sv - not_S3_sv, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+res_not_S4_sv <- results(dds_no_inhouse_batch_corrected_deseq_svseq, contrast = S4_sv - not_S4_sv, filterFun = ihw, alpha = 0.1, lfcThreshold = 1, altHypothesis = "greater")
+```
+
+# CIBERSORT
+
+## Run CIBERSORT using non-batch corrected data
+
+```{r}
+cibersort_output <- read.csv("intermediate_files/cibersort/CIBERSORTx_Job9_Results_2022-09-21.csv")
+```
+
+```{r}
+cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
+cibersort_plot_online <- ggplot(cibersort_results_long_online, 
+                                aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) +
+  geom_col() + 
+  ggtitle("CIBERSORT results") +   
+  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
+  xlab("Mixture") + 
+  ylab("Proportion")
+```
+
+```{r}
+cibersort_plot_online
+ggsave(filename = "outfiles/cibersort_results_online_2022-09-25.png", plot = cibersort_plot_online)
+```
+
+```{r}
+metadata_inhouse <- metadata[metadata$Study == "InHouse",]
+metadata_inhouse <- rownames_to_column(metadata_inhouse, var = "Mixture")
+cibersort_output$Mixture <- as.character(cibersort_output$Mixture)
+cibersort_output_metadata <- inner_join(metadata_inhouse, cibersort_output)
+cibersort_output_metadata
+hist(cibersort_output$S1)
+```
+
+```{r}
+s1.tumour <- cibersort_output_metadata$S1[which(cibersort_output_metadata$Tumor_JuxtaTumor == "tumor")]
+s1.juxta <- cibersort_output_metadata$S1[which(cibersort_output_metadata$Tumor_JuxtaTumor == "juxtatumor")]
+mean(cibersort_output_metadata$S1[which(cibersort_output_metadata$Tumor_JuxtaTumor == "juxtatumor")])
+mean(cibersort_output_metadata$S1[which(cibersort_output_metadata$Tumor_JuxtaTumor == "tumor")])
+wilcox.test(s1.tumour, s1.juxta, alternative = "two.sided")
+
+s4.tumour <- cibersort_output_metadata$S4[which(cibersort_output_metadata$Tumor_JuxtaTumor == "tumor")]
+s4.juxta <- cibersort_output_metadata$S4[which(cibersort_output_metadata$Tumor_JuxtaTumor == "juxtatumor")]
+wilcox.test(s4.tumour, s4.juxta, alternative = "greater")
+
+mean(cibersort_output_metadata$S4[which(cibersort_output_metadata$Tumor_JuxtaTumor == "juxtatumor")])
+mean(cibersort_output_metadata$S4[which(cibersort_output_metadata$Tumor_JuxtaTumor == "tumor")])
+```
+## Run CIBERSORTx using batch-corrected data
+
+For this, we need to calculate TPM using our Combat-Seq counts
+
+```{r}
+files.gene <- file.path(metadata$directory, rownames(metadata), "quant.genes.sf")
+files.gene.samples <- str_split_fixed(files.gene, pattern = "/", n = 11)[,10]
+files.gene.outliers.removed <- files.gene[files.gene.samples %in% colnames(dds_batch_corrected_outliers_removed2)]
+sample.names.outliers.removed <- files.gene.samples[files.gene.samples %in% colnames(dds_batch_corrected_outliers_removed2)]
+
+```
+
+```{r}
+read_in_quant_genes_1_arg <- function(file.name){
+  x <- read.table(file = file.name, header = T)[,c(1,3)]
+  #colnames(x)[2] <- as.character(sample.name)
+  return(x)
+}
+genes.effective.lengths <- lapply(files.gene.outliers.removed, read_in_quant_genes_1_arg)
+genes.effective.lengths
+dim(genes.effective.lengths)
+
+genes.effective.lengths.list <- list()
+for (i in 1:length(genes.effective.lengths)){
+  df <- genes.effective.lengths[[i]]
+  colnames(df)[2] <- sample.names.outliers.removed[i]
+  genes.effective.lengths.list[[i]] <- df
+}
+
+```
+
+```{r}
+genes.effective.lengths.df <- genes.effective.lengths.list %>% purrr::reduce(inner_join, by = "Name")
+tx2gene.ensg <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+colnames(tx2gene.ensg)[2] <- "Name"
+genes.effective.lengths.df.hgnc <- left_join(genes.effective.lengths.df, tx2gene.ensg,by = "Name")
+```
+
+```{r}
+genes.effective.lengths.df.hgnc
+```
+
+```{r}
+df_dds_batch_corrected_outliers_removed2 <- assay(dds_batch_corrected_outliers_removed2)[2:nrow(assay(dds_batch_corrected_outliers_removed2)),]
+dim(df_dds_batch_corrected_outliers_removed2)
+#rownames(tx2gene.ensg) <- tx2gene.ensg$Name
+```
+
+CONSIDERING DOING EVERYTHING AGAIN WITH ENSG1234.1 etc FOR TPM NORMALISATION
+Using ENST here!
+
+## Read in data ENST etc
+
+```{r}
+se.txout <- tximeta(coldata, skipMeta=TRUE, txOut=TRUE, tx2gene=tx2gene)
+
+```
+
+```{r Carry out all steps up to vsd step for se.txout}
+dds_txout <- DESeqDataSet(se.txout, design = ~1)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds_txout)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds_txout <- dds_txout[keep,]
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds_txout))
+#X <- 7
+keep <- rowSums(counts(dds_txout) >= 10) >= X
+dds_txout <- dds_txout[keep,]
+colData(dds_txout)$outlier <- ifelse(dds_txout$names %in% sample.names.outliers.removed, "not_outlier", "outlier")
+vsd_txout <- vst(dds_txout, blind = TRUE)
+```
+
+```{r}
+# plot pca of transcript level data to see if the same samples look to be outliers
+sample.names.outliers.removed
+sample.names.outliers <- files.gene.samples[!(files.gene.samples %in% colnames(dds_batch_corrected_outliers_removed2))]
+plotPCA(vsd_txout, intgroup = c("outlier"), ntop = nrow(vsd_txout))
+```
+
+```{r remove outliers}
+dds_txout_remove_outliers <- dds_txout[,which((colData(dds_txout)$outlier == "outlier") == FALSE)]
+```
+
+```{r}
+# remove batch effect
+counts_matrix_remove_outliers <- assay(dds_txout_remove_outliers)
+batch_remove_outliers <- colData(dds_txout_remove_outliers)$Study
+print(paste("Number of genes before filtering: ", nrow(counts_matrix_remove_outliers), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+counts_filt <- counts_matrix_remove_outliers[apply(counts_matrix_remove_outliers, 1, function(x) sum(x == 0)) < ncol(counts_matrix_remove_outliers) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(counts_filt), sep = ""))
+combat_seq_group <- colData(dds_txout_remove_outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+adjusted_remove_outliers <- ComBat_seq(counts = counts_filt, batch = batch_remove_outliers, group = combat_seq_group, full_mod = TRUE)
+dds_batch_corrected_txout <- DESeqDataSetFromMatrix(adjusted_remove_outliers, colData = colData(dds_txout_remove_outliers), design = ~1)
+```
+
+CONSIDERING DOING EVERYTHING AGAIN WITH ENSG1234.1 etc FOR TPM NORMALISATION
+
+## Read in data ENST etc
+
+```{r}
+tx2gene.ensg.enst <- getBM(attributes = c("ensembl_transcript_id_version", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+se.ensembl.version <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene.ensg.enst)
+```
+
+```{r Carry out all steps up to vsd step for se_hgnc}
+dds_ensembl_version <- DESeqDataSet(se.ensembl.version, design = ~1)
+# returns a vector of whether the total count of each gene is >= 10 (True or false)
+keep <- rowSums(counts(dds_ensembl_version)) >= 10
+# only keep rows (genes) for which keep is TRUE
+dds_ensembl_version <- dds_ensembl_version[keep,]
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds_ensembl_version))
+#X <- 7
+keep <- rowSums(counts(dds_ensembl_version) >= 10) >= X
+dds_ensembl_version <- dds_ensembl_version[keep,]
+colData(dds_ensembl_version)$outlier <- ifelse(dds_ensembl_version$names %in% sample.names.outliers.removed, "not_outlier", "outlier")
+vsd_ensembl_version<- vst(dds_ensembl_version, blind = TRUE)
+```
+
+```{r}
+# plot pca of ensembl_gene_version level data to see if the same samples look to be outliers
+#sample.names.outliers.removed
+#sample.names.outliers <- files.gene.samples[!(files.gene.samples %in% colnames(dds_batch_corrected_outliers_removed2))]
+plotPCA(vsd_ensembl_version, intgroup = c("outlier"), ntop = nrow(vsd_ensembl_version))
+```
+
+```{r remove outliers}
+dds_ensembl_version_remove_outliers <- dds_ensembl_version[,which((colData(dds_ensembl_version)$outlier == "outlier") == FALSE)]
+```
+
+```{r}
+# remove batch effect
+counts_matrix_remove_outliers <- assay(dds_ensembl_version_remove_outliers)
+batch_remove_outliers <- colData(dds_ensembl_version_remove_outliers)$Study
+print(paste("Number of genes before filtering: ", nrow(counts_matrix_remove_outliers), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+counts_filt <- counts_matrix_remove_outliers[apply(counts_matrix_remove_outliers, 1, function(x) sum(x == 0)) < ncol(counts_matrix_remove_outliers) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(counts_filt), sep = ""))
+combat_seq_group <- colData(dds_ensembl_version_remove_outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+# remove batch effects between studies while maintaining differences between tumour/juxtatumor
+adjusted_remove_outliers <- ComBat_seq(counts = counts_filt, batch = batch_remove_outliers, group = combat_seq_group, full_mod = TRUE)
+dds_batch_corrected_ensembl_version <- DESeqDataSetFromMatrix(adjusted_remove_outliers, colData = colData(dds_ensembl_version_remove_outliers), design = ~1)
+```
+
+```{r}
+vsd_dds_batch_corrected_ensembl_version <- vst(dds_batch_corrected_ensembl_version, blind = TRUE)
+plotPCA(vsd_dds_batch_corrected_ensembl_version, intgroup = "Subpopulation", ntop = nrow(vsd_dds_batch_corrected_ensembl_version))
+```
+
+```{r}
+df_dds_batch_corrected_ensembl_version <- assay(dds_batch_corrected_ensembl_version)
+df_dds_batch_corrected_ensembl_version
+```
+
+Only 9000 genes left when I do this filtering
+
+```{r}
+rownames(genes.effective.lengths.df) <- NULL
+genes.effective.lengths.df.filtered <- genes.effective.lengths.df[which(genes.effective.lengths.df$Name %in% rownames(df_dds_batch_corrected_ensembl_version)),]
+```
+
+```{r}
+df_dds_batch_corrected_ensembl_version_matched <- df_dds_batch_corrected_ensembl_version[genes.effective.lengths.df.filtered$Name,]
+```
+
+```{r}
+rownames(genes.effective.lengths.df.filtered) <- genes.effective.lengths.df.filtered$Name
+genes.effective.lengths.df.filtered$Name <- NULL
+df_dds_batch_corrected_ensembl_version_matched <- data.frame(df_dds_batch_corrected_ensembl_version_matched)
+genes.effective.lengths.df.filtered[1:5,1:5]
+df_dds_batch_corrected_ensembl_version_matched[1:5,1:5]
+```
+
+TPM function from https://gist.github.com/slowkow/c6ab0348747f86e2748b 
+Here we have the effective lengths for each gene in each sample calculated by Salmon (this would also use the mean fragment length).
+
+```{r TPM function}
+tpm <- function(counts, lengths) {
+  # first normalise for gene length
+  rate <- counts / lengths
+  # then normalise for total number of normalised counts in that sample
+  rate / sum(rate) * 1e6
+}
+```
+
+```{r}
+tpm.out <- tpm(counts = df_dds_batch_corrected_ensembl_version_matched, lengths = genes.effective.lengths.df.filtered)
+tpm.out
+tpms
+```
+
+Use Michael Love's calculation to make sure we are getting the same answer: https://support.bioconductor.org/p/91218/#91256
+
+```{r}
+tpm.love <- function(counts.mat, gene.length){
+x <- counts.mat / gene.length
+#Then with this matrix x, you do the following:
+tpm.mat <- t( t(x) * 1e6 / colSums(x) )
+}
+```
+
+```{r}
+tpm.out.love <- tpm.love(counts.mat =df_dds_batch_corrected_ensembl_version_matched, gene.length = genes.effective.lengths.df.filtered )
+tpm.out.love
+```
+
+```{r}
+counts.per.unit.length <- df_dds_batch_corrected_ensembl_version_matched/genes.effective.lengths.df.filtered
+sum.all.columns <- colSums(counts.per.unit.length)
+scaling.factors <- sum.all.columns/1e6
+# need to transpose the counts per unit length df so that vector division is defined - nrow(counts.per.unit.length) == length(scaling.factors) - vector is a 1x97 matrix
+counts.per.unit.length.t <- t(counts.per.unit.length)
+nrow(counts.per.unit.length.t) == length(scaling.factors)
+output <- data.frame(t(counts.per.unit.length.t/scaling.factors))
+output
+```
+
+```{r}
+tpm.out.love
+```
+
+Create table for CIBERSORT signatrue matrix construction
+
+```{r}
+tpm.out.love <- data.frame(tpm.out.love)
+```
+
+```{r}
+colData(dds_batch_corrected_outliers_removed)
+tpm.out.mixture <- tpm.out.love[,which(colData(dds_batch_corrected_outliers_removed)$Study == "InHouse")]
+tpm.out.mixture.genes <- tibble::rownames_to_column(tpm.out.mixture, "genes")
+#write.table(tpm.out.mixture.genes, file = "intermediate_files/cibersort/caf_tpm_mixture_engs_version_batch_corrected_2022-09-30.txt", sep = "\t", quote = F, row.names = F)
+```
+
+```{r}
+tpm.out.signature <- tpm.out.love[,which(colData(dds_batch_corrected_outliers_removed)$Study != "InHouse")]
+subpop_labelled <- colData(dds_batch_corrected_outliers_removed)$Subpopulation
+subpop_labelled_mixture <- subpop_labelled[which(subpop_labelled != "Unknown")]
+colnames(tpm.out.signature) <- subpop_labelled_mixture
+```
+
+```{r}
+s1_cols <- which(subpop_labelled_mixture == "S1")
+s3_cols <- which(subpop_labelled_mixture == "S3")
+s4_cols <- which(subpop_labelled_mixture == "S4")
+
+s1_cols_length <- length(s1_cols)
+s3_cols_length <- length(s3_cols)
+s4_cols_length <- length(s4_cols)
+```
+
+
+
+```{r}
+S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
+S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
+S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
+if (length(S1) != length(colnames(tpm_data_no_inhouse_order))-1){
+  stop("length s1 row incorrect")
+} else if (length(S3) != length(colnames(tpm_data_no_inhouse_order))-1) {
+  stop("length s3 row incorrect")
+} else if (length(S4) != length(colnames(tpm_data_no_inhouse_order))-1) {
+  stop("length s4 row incorrect")
+}
+
+out <- rbind.data.frame(S1, S3, S4)
+colnames(out) <- NULL
+row.names(out) <- c("S1", "S3", "S4")
+#write.table(out, file = "intermediate_files/cibersort/phenoclasses_caf_20220930.txt", sep = "\t", quote = F, col.names = F)
+```
+
+```{r}
+tpm_data_no_inhouse_order <- tibble(genes = rownames(tpm.out.signature), 
+                                              tpm.out.signature[,s1_cols], 
+                                              tpm.out.signature[,s3_cols],
+                                              tpm.out.signature[,s4_cols],
+                                              .name_repair = "minimal"
+)
+cols_no_inhouse <- c(rep("S1", s1_cols_length), rep("S3", s3_cols_length), rep("S4", s4_cols_length))
+colnames(tpm_data_no_inhouse_order)[2:ncol(tpm_data_no_inhouse_order)] <- cols_no_inhouse
+#write.table(tpm_data_no_inhouse_order, file = "intermediate_files/cibersort/caf_tpm_subpopulations_for_signature_engs_version_batch_corrected_2022-09-30.txt", sep = "\t", quote = F, row.names = F)
+
+```
+
+## Run CIBERSORT using non-batch corrected data
+
+```{r}
+cibersort_output <- read.csv("intermediate_files/cibersort/CIBERSORTx_Job12_Results.csv")
+cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
+```
+
+```{r}
+cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
+cibersort_plot_online <- ggplot(cibersort_results_long_online, 
+                                aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) +
+  geom_col() + 
+  ggtitle("CIBERSORT results") +   
+  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
+  xlab("Mixture") + 
+  ylab("Proportion")
+```
+
+```{r}
+cibersort_plot_online
+ggsave(filename = "outfiles/cibersort_results_online_2022-09-30.png", plot = cibersort_plot_online)
+```
+
+```{r}
+metadata_inhouse_cibersort_results <- full_join(metadata_inhouse, cibersort_output, by = "Mixture")
+metadata_inhouse_cibersort_results_caf <- metadata_inhouse_cibersort_results[metadata_inhouse_cibersort_results$Tumor_JuxtaTumor == "tumor",]
+metadata_inhouse_cibersort_results_tan <- metadata_inhouse_cibersort_results[metadata_inhouse_cibersort_results$Tumor_JuxtaTumor == "juxtatumor",]
+median(metadata_inhouse_cibersort_results_caf$S1)
+median(metadata_inhouse_cibersort_results_caf$S3)
+median(metadata_inhouse_cibersort_results_caf$S4)
+
+median(metadata_inhouse_cibersort_results_tan$S1)
+median(metadata_inhouse_cibersort_results_tan$S3)
+median(metadata_inhouse_cibersort_results_tan$S4)
+```
+

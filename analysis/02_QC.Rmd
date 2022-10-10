@@ -30,6 +30,7 @@ Salmon was used in alignment mode so there is no salmon index and no checksum to
 
 ```{r Functions}
 filter_out_low_expressed <- function(dds){
+  print(paste("no of genes before filtering...", nrow(dds)))
   # returns a vector of whether the total count of each gene is >= 10 (True or false)
   keep <- rowSums(counts(dds)) >= 10
   # only keep rows (genes) for which keep is TRUE
@@ -38,6 +39,8 @@ filter_out_low_expressed <- function(dds){
   X <- round(0.05*ncol(dds))
   keep <- rowSums(counts(dds) >= 10) >= X
   dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
 }
 ```
 
@@ -199,16 +202,20 @@ This demonstrates that there are batch effects that need to be removed.
 ```{r}
 rv <- rowVars(assay(vsd.hgnc))
 pc <- prcomp(t(assay(vsd.hgnc)[head(order(-rv),nrow(assay(vsd.hgnc))),]))
-# -110 found by visual inspection - see README
-idx <- pc$x[,1] < -110
+# -110 found by visual inspection - see README - this gets rid of 16 samples. -200 gets rid of 11 samples...
+idx <- pc$x[,1] < -200
 print(paste("Number of samples being removed,", length(idx[which(idx == TRUE)]), sep = " "))
 patient_samples <- rownames(metadata)
 patient_samples <- patient_samples[!idx]
+outliers <- patient_samples[idx]
+print("Outliers: ")
+print(outliers)
 # create new metadata file 
 metadata_reduced <- metadata[patient_samples,]
 date <- Sys.Date()
 metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_hgnc_", date, ".txt", sep = "")
-#print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+print("not writing to  file")
 #write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
 ```
 
@@ -244,6 +251,7 @@ metadata_reduced <- metadata[patient_samples,]
 date <- Sys.Date()
 metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_ensembl_gene_id_version_", date, ".txt", sep = "")
 print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+print("not writing to file")
 #write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
 ```
 
@@ -334,7 +342,8 @@ plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Tumor_JuxtaTumor
 ```{r Write to file hgnc}
 date <- Sys.Date()
 outfile.hgnc <- paste("../intermediate_files/dds_batch_corrected_group_tumor_hgnc_", date, ".Rds", sep = "")
-#print(paste("writing batch corrected data to ", outfile.hgnc, sep = ""))
+print(paste("writing batch corrected data to ", outfile.hgnc, sep = ""))
+print("not writing to file")
 #saveRDS(dds.hgnc.remove.outliers.batch.corrected, file = outfile.hgnc)
 ```
 
@@ -342,5 +351,6 @@ outfile.hgnc <- paste("../intermediate_files/dds_batch_corrected_group_tumor_hgn
 date <- Sys.Date()
 outfile.ensg <- paste("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_", date, ".Rds", sep = "")
 print(paste("writing batch corrected data to ", outfile.ensg, sep = ""))
-saveRDS(dds.ensg.remove.outliers.batch.corrected, file = outfile.ensg)
+print("not writing to file")
+#saveRDS(dds.ensg.remove.outliers.batch.corrected, file = outfile.ensg)
 ```

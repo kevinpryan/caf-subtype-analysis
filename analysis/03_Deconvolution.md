@@ -1,15 +1,9 @@
-Deconvolution
+Deconvolution file preparation
 ================
 
 - <a href="#cibersort" id="toc-cibersort">CIBERSORT</a>
   - <a href="#generate-inputs-to-cibersort"
     id="toc-generate-inputs-to-cibersort">Generate inputs to CIBERSORT</a>
-  - <a href="#cibersort-results" id="toc-cibersort-results">CIBERSORT
-    results</a>
-    - <a href="#cibersort-results-online"
-      id="toc-cibersort-results-online">CIBERSORT results online</a>
-    - <a href="#cibersort-results-docker"
-      id="toc-cibersort-results-docker">CIBERSORT results docker</a>
 
 # CIBERSORT
 
@@ -19,6 +13,8 @@ the effective gene lengths from the Salmon output. Therefore, we must
 use the ENGS gene id version.
 
 ## Generate inputs to CIBERSORT
+
+The function `tpm.convert` is used to convert the counts to TPM.
 
 ``` r
 tpm.convert <- function(counts.mat, gene.length){
@@ -35,7 +31,8 @@ read_in_quant_genes <- function(file.name){
 ```
 
 ``` r
-dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-03.Rds")
+#dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-03.Rds")
+dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-07.Rds")
 ```
 
 ``` r
@@ -64,8 +61,14 @@ for (i in 1:length(genes.effective.lengths)){
 
 ``` r
 genes.effective.lengths.df <- genes.effective.lengths.list %>% purrr::reduce(inner_join, by = "Name")
-mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
-                #host="uswest.ensembl.org")
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+                host="useast.ensembl.org")
+```
+
+    ## Warning: Ensembl will soon enforce the use of https.
+    ## Ensure the 'host' argument includes "https://"
+
+``` r
 tx2gene.ensg <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
 colnames(tx2gene.ensg)[2] <- "Name"
 genes.effective.lengths.df.hgnc <- left_join(genes.effective.lengths.df, tx2gene.ensg,by = "Name")
@@ -220,81 +223,3 @@ row.names(out) <- c("S1", "S3", "S4")
 outfile.name <-  paste("intermediate_files/cibersort/phenoclasses_caf_", Sys.Date(), ".txt", sep = "")
 #write.table(out, file = here(outfile.name), sep = "\t", quote = F, col.names = F)
 ```
-
-## CIBERSORT results
-
-### CIBERSORT results online
-
-``` r
-cibersort_output <- read.csv(here("intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv"))
-cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
-```
-
-``` r
-cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
-cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
-cibersort_plot_online <- ggplot(cibersort_results_long_online, 
-                                aes(x = as.character(Mixture), y = value, fill = Subpopulation)) +
-  geom_col() + 
-  ggtitle("CIBERSORT results online") +   
-  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
-  xlab("Mixture") + 
-  ylab("Proportion") +
-  theme(#panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(), 
-        axis.line = element_line(colour = "black")) +
-      scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
-```
-
-``` r
-cibersort_plot_online
-```
-
-![](03_Deconvolution_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
-
-``` r
-outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".png", sep = "")
-#ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online)
-```
-
-### CIBERSORT results docker
-
-``` r
-cibersort_output_docker <- read.table(here("intermediate_files/cibersort/outputs/CIBERSORTx_Results.txt"), header = T)
-cibersort_output_docker$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output_docker$Mixture)
-```
-
-``` r
-cibersort_results_long_docker <- pivot_longer(cibersort_output_docker, cols = c(S1, S3, S4), names_to = "Subpopulation")
-cibersort_results_long_docker$Mixture <- as.character(cibersort_results_long_docker$Mixture)
-cibersort_plot_docker <- ggplot(cibersort_results_long_docker, 
-                                aes(x = as.character(Mixture), y = value, fill = `Subpopulation`)) +
-  geom_col() + 
-  ggtitle("CIBERSORT results Docker") +   
-  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
-  xlab("Mixture") + 
-  ylab("Proportion") +
-  theme(#panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(), 
-        axis.line = element_line(colour = "black")) +
-      scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
-```
-
-``` r
-cibersort_plot_docker
-```
-
-![](03_Deconvolution_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
-
-``` r
-outfile.plot.name.docker <-  paste("outfiles/cibersort_results_docker_", Sys.Date(), ".png", sep = "")
-#ggsave(filename = here(outfile.plot.name.docker), plot = cibersort_plot_docker)
-```
-
-``` r
-cibersort_grid
-```
-
-![](03_Deconvolution_files/figure-gfm/CIBERSORT%20plots-1.png)<!-- -->
