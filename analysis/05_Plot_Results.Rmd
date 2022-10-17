@@ -1,5 +1,5 @@
 ---
-title: "Results Plots"
+title: "Results CIBERSORT"
 output: 
   github_document:
      toc: true
@@ -193,3 +193,85 @@ ggplot(cibersort_output_metadata,
       scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
 
 ```
+### Line Plots
+
+```{r}
+library("ggpubr")
+ggline(cibersort_output_metadata, x = "Condition", y = "S1", 
+       add = c("median", "jitter"), 
+          order = c("TAN", "CAF"),
+          ylab = "Proportion", xlab = "Condition",
+       title = "Line plot TAN CAF proportions S1\n Median marked")
+
+ggline(cibersort_output_metadata, x = "Condition", y = "S3", 
+       add = c("median", "jitter"), 
+          order = c("TAN", "CAF"),
+          ylab = "Proportion", xlab = "Condition",
+       title = "Line plot TAN CAF proportions S3\n Median marked")
+
+ggline(cibersort_output_metadata, x = "Condition", y = "S4", 
+       add = c("median", "jitter"), 
+          order = c("TAN", "CAF"),
+          ylab = "Proportion", xlab = "Condition",
+       title = "Line plot TAN CAF proportions S4\n Median marked")
+
+```
+
+```{r Plot paired data}
+
+# Subset weight data before treatment
+#TAN <- subset(cibersort_output_metadata,  Condition == "TAN", S1,
+            #     drop = TRUE)
+# subset weight data after treatment
+#CAF <- subset(cibersort_output_metadata,  group == "after", weight,
+               #  drop = TRUE)
+# Plot paired data
+#library(PairedData)
+#pd <- paired(before, after)
+#plot(pd, type = "profile") + theme_bw()
+```
+
+
+### Significance tests
+
+
+```{r Test for normality}
+shapiro.test(cibersort_output_metadata$S1)
+shapiro.test(cibersort_output_metadata$S3)
+shapiro.test(cibersort_output_metadata$S4)
+
+```
+
+```{r}
+group_by(cibersort_output_metadata, Condition) %>%
+  summarise(
+    count = n(),
+    median = median(S1, na.rm = TRUE),
+    IQR = IQR(S1, na.rm = TRUE)
+  )
+
+group_by(cibersort_output_metadata, Condition) %>%
+  summarise(
+    count = n(),
+    median = median(S3, na.rm = TRUE),
+    IQR = IQR(S3, na.rm = TRUE)
+  )
+
+group_by(cibersort_output_metadata, Condition) %>%
+  summarise(
+    count = n(),
+    median = median(S4, na.rm = TRUE),
+    IQR = IQR(S4, na.rm = TRUE)
+  )
+```
+
+```{r}
+s1.test <- wilcox.test(S1 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
+s3.test <- wilcox.test(S3 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
+s4.test <- wilcox.test(S4 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
+p.values <- c(s1.test, s3.test, s4.test)
+wilcox_results <- data.frame(Subpopulation = c("S1", "S3", "S4"), p.value = p.values, p.adj = p.adjust(p.values, method = "bonferroni"))
+wilcox_results
+```
+
+We can see that there might be a difference in S4 proportions between CAF and TANs, but that it is not statistically significant using a paired Wilcoxon signed rank test.
