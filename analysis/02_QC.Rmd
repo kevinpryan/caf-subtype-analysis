@@ -22,6 +22,24 @@ library(sva)
 ```
 
 
+```{r echo=F}
+svaBatchCor <- function(dat, mmi, mm0,n.sv=NULL, svs.include = NULL){
+    dat <- as.matrix(dat)
+    Y <- t(dat)
+    library(sva)
+    if(is.null(n.sv)) n.sv <- num.sv(dat,mmi,method="leek")
+    o <- sva(dat,mmi,mm0,n.sv=n.sv)
+    if (is.null(svs.include)){
+      W <- o$sv
+    } else{
+      W <- o$sv[,svs.include]
+    }
+    alpha <- solve(t(W) %*% W) %*% t(W) %*% Y
+    o$corrected <- t(Y - W %*% alpha)
+    return(o)
+}
+```
+
 # Read in data
 
 Samples were processed with nf-core/rnaseq version `3.8.1`.
@@ -210,6 +228,7 @@ patient_samples <- patient_samples[!idx]
 outliers <- patient_samples[idx]
 print("Outliers: ")
 print(outliers)
+paste(outliers, collapse = "|")
 # create new metadata file 
 metadata_reduced <- metadata[patient_samples,]
 date <- Sys.Date()
@@ -353,4 +372,139 @@ outfile.ensg <- paste("../intermediate_files/dds_batch_corrected_group_tumor_ens
 print(paste("writing batch corrected data to ", outfile.ensg, sep = ""))
 print("not writing to file")
 #saveRDS(dds.ensg.remove.outliers.batch.corrected, file = outfile.ensg)
+```
+
+### Surrogate variable analysis
+
+#### SVA removes biological signal
+
+Is surrogate variable analysis required on the batch-corrected data? Does it remove the biological signal completely?
+
+Source of this code: https://www.bioconductor.org/packages/devel/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html 
+
+```{r}
+keep <- which(colData(dds.ensg.remove.outliers.batch.corrected)$Subpopulation != "Unknown")
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- dds.ensg.remove.outliers.batch.corrected[,keep]
+```
+
+```{r extract normalised counts and remove genes with low counts ENSG}
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+counts.ensg.remove.outliers.batch.corrected.no.inhouse  <- counts(dds.ensg.remove.outliers.batch.corrected.no.inhouse, normalized = TRUE)
+idx  <- rowMeans(counts.ensg.remove.outliers.batch.corrected.no.inhouse) > 1
+counts.ensg.remove.outliers.batch.corrected.no.inhouse  <- counts.ensg.remove.outliers.batch.corrected.no.inhouse[idx, ]
+```
+
+```{r}
+plotPCA(vst(dds.ensg.remove.outliers.batch.corrected.no.inhouse), ntop = nrow(dds.ensg.remove.outliers.batch.corrected.no.inhouse), intgroup = "Subpopulation")
+```
+
+```{r surrogate variable analysis}
+mod <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse))
+mod0 <- model.matrix(~ 1, colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse))
+svseq_no_inhouse <- svaseq(counts.ensg.remove.outliers.batch.corrected.no.inhouse, mod, mod0) # use number of surrogate variables determined by the package, number is 22
+```
+
+
+```{r Add surrogate variables to model matrix and make categorical variables factors}
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation)
+
+sv_names <- paste("SV", seq(1,svseq_no_inhouse$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+  colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse$sv[,i]
+}
+
+```
+
+```{r Assign design formula}
+design(dds.ensg.remove.outliers.batch.corrected.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 +SV19 + SV20 + SV21 + SV22 + Subpopulation
+```
+
+```{r Do these surrogate variables account for lots of the variation in the data?}
+vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse <- vst(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+
+```{r Remove SVs to see if biological variation remains after removal}
+counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs <- svaBatchCor(counts.ensg.remove.outliers.batch.corrected.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 22)$corrected
+pca.metadata <- colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)[,1:4]
+pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs <- pca(counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs, metadata = pca.metadata)
+```
+
+```{r}
+PCAtools::biplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs, lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nbatch-corrected data with surrogate variables\nremoved")
+```
+
+```{r}
+eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs, metavars = c('Subpopulation', 'Tumor_JuxtaTumor', 'Study'),
+             main = "Correlation between PCs and variables of interest\nafter batch correction with Combat-Seq\nand removal of surrogate variables", cexMain = 1.5)
+```
+
+From the above we can see that when we include surrogate variables, we lose our biological signal.
+
+#### Which SVs are correlated with the labels?
+
+Below is a look at which SVs are correlated with Subpopulation. This was done in a hope that one could pick and choose which SVs to include in the DE analysis. It does not seem to be a feasible option.
+
+Do an eigencorplot on the batch-corrected data, looking for correlations with the clinical covariates and the surrogate variables identified with SVA
+
+```{r}
+vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse.assay <- assay(vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse <- pca(vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse.assay, metadata = colData(vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse)[,-c(5,6)])
+```
+
+```{r}
+eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse, metavars = colnames(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse$metadata))
+```
+
+```{r}
+shapiro.test(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse$metadata$SV1)$p.value # not normally distributed, can't do ANOVA
+```
+
+```{r}
+subpopulation_svs <- data.frame(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse$metadata)[,-c(1,2,4)]
+library("ggpubr")
+ggline(subpopulation_svs, x = "Subpopulation", y = "SV1", 
+       add = c("mean_se", "jitter"), 
+          order = c("S1", "S3", "S4"),
+          ylab = "Surrogate variable 1", xlab = "Subpopulation")
+
+ggline(subpopulation_svs, x = "Subpopulation", y = "SV5", 
+       add = c("mean_se", "jitter"), 
+          order = c("S1", "S3", "S4"),
+          ylab = "Surrogate variable 5", xlab = "Subpopulation")
+
+ggline(subpopulation_svs, x = "Subpopulation", y = "SV8", 
+       add = c("mean_se", "jitter"), 
+          order = c("S1", "S3", "S4"),
+          ylab = "Surrogate variable 8", xlab = "Subpopulation")
+
+
+```
+
+```{r}
+kruskal_results <- data.frame(SV = colnames(subpopulation_svs)[2:ncol(subpopulation_svs)], pval = rep(1, ncol(subpopulation_svs)-1))
+for (i in 2:ncol(subpopulation_svs)){
+  kruskal_results[i-1,2] <- kruskal.test(subpopulation_svs[,i] ~ Subpopulation, data = subpopulation_svs)$p.value
+}
+kruskal_results$padj <- p.adjust(p = kruskal_results$pval, method = "BH")
+kruskal_results$sig <- ifelse(kruskal_results$padj < 0.1, "Yes", "No")
+kruskal_results
+```
+
+Try to remove all SVs except for SV8 and SV6
+
+```{r}
+svs.include <- c(6,8)
+counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6 <- svaBatchCor(counts.ensg.remove.outliers.batch.corrected.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 22, svs.include = svs.include)$corrected
+```
+
+```{r}
+pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6 <- pca(counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6, metadata = pca.metadata)
+eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6, metavars = c('Subpopulation', 'Tumor_JuxtaTumor', 'Study'),
+             main = "Correlation between PCs and variables of interest\nafter batch correction with Combat-Seq\nand removal of surrogate variables\nwith only SV6 or SV8", cexMain = 1.5)
+```
+
+```{r}
+PCAtools::biplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6, lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nbatch-corrected data with surrogate variables\nremoved SV6 SV8")
 ```
