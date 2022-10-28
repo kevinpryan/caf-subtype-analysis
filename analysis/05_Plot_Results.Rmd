@@ -17,6 +17,24 @@ library(ggplot2)
 library(cowplot)
 library(tidyr)
 library(dplyr)
+library(biomaRt)
+```
+
+```{r include=FALSE}
+getBM.call <- function(vec){
+  info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description",
+                               "entrezgene_id"),
+                  filters = "ensembl_gene_id_version",
+                  values = vec,
+                  mart = mart,
+                  useCache=FALSE)
+}
 ```
 
 # CIBERSORT
@@ -29,6 +47,22 @@ metadata$Condition <- ifelse(metadata$Condition == "Tumour", "CAF", "TAN")
 ```
 
 ## CIBERSORT results online
+
+### Signature matrix
+
+```{r Look at signature matrix made by CIBERSORT}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+                host="useast.ensembl.org")
+sig.matrix <- read.table(here("intermediate_files/cibersort/CIBERSORTx_Job15_phenoclasses_caf_2022-10-07.CIBERSORTx_Job15_caf_tpm_for_signature_engs_version_batch_corrected_2022-10-07.bm.K999.txt"), header = T)
+biomart.output <- getBM.call(sig.matrix$NAME)
+sig.matrix$hgnc_symbol <- biomart.output$hgnc_symbol
+```
+
+The only CAF marker found in the signature matrix is ACTA2 (alphaSMA), which has higher expression in S4 in this signature matrix
+
+```{r}
+sig.matrix[sig.matrix$hgnc_symbol == "ACTA2",]
+```
 
 ```{r echo=FALSE}
 cibersort_output <- read.csv(here("intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv"))
@@ -58,11 +92,11 @@ cibersort_plot_online
 
 ```{r echo=FALSE}
 outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".png", sep = "")
-ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online)
+#ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online)
 ```
 
 ```{r echo=FALSE}
-print(paste("saved to ...", outfile.plot.name))
+#print(paste("saved to ...", outfile.plot.name))
 ```
 
 ## CIBERSORT results docker
@@ -95,11 +129,11 @@ cibersort_plot_docker
 
 ```{r echo=FALSE}
 outfile.plot.name.docker <-  paste("outfiles/cibersort_results_docker_", Sys.Date(), ".png", sep = "")
-ggsave(filename = here(outfile.plot.name.docker), plot = cibersort_plot_docker)
+#ggsave(filename = here(outfile.plot.name.docker), plot = cibersort_plot_docker)
 ```
 
 ```{r echo=FALSE}
-print(paste("saved to ...", outfile.plot.name.docker))
+#print(paste("saved to ...", outfile.plot.name.docker))
 ```
 
 ```{r, include = FALSE}
@@ -124,11 +158,11 @@ cibersort_grid <- plot_grid(cibersort_plot_online + theme(legend.position = "non
       align = 'h')
 cibersort_grid <- plot_grid(cibersort_grid, legend, rel_widths = c(3,.5))
 outfile.plot.name.combined <-  paste("outfiles/cibersort_plot_combined_batch_corrected_", Sys.Date(), ".png", sep = "")
-ggsave(filename = here(outfile.plot.name.combined), 
-       plot = cibersort_grid,
-       width = 20,
-       height = 10,
-       units = "cm")
+#ggsave(filename = here(outfile.plot.name.combined), 
+ #      plot = cibersort_grid,
+  #     width = 20,
+   #    height = 10,
+    #   units = "cm")
 ```
 
 ```{r CIBERSORT plots}
@@ -274,4 +308,22 @@ wilcox_results <- data.frame(Subpopulation = c("S1", "S3", "S4"), p.value = p.va
 wilcox_results
 ```
 
-We can see that there might be a difference in S4 proportions between CAF and TANs, but that it is not statistically significant using a paired Wilcoxon signed rank test.
+We can see that there might be a difference in S4 proportions between CAF and TANs, but that it is not statistically significant using a paired Wilcoxon signed rank test. That is, we are unable to reject the null hypothesis that the difference proportion of the S4 subpopulation in CAFs and TANs is zero.
+
+```{r}
+cibersort_output_metadata
+```
+
+```{r}
+max.proportion <- c()
+for (i in 1:nrow(cibersort_output_metadata)){
+  max.proportion[i] <- names(which.max(cibersort_output_metadata[i,2:4]))
+}
+max.proportion
+cibersort_output_metadata$max_proportion_cibersort <- max.proportion
+cibersort_output_metadata[which(cibersort_output_metadata$max_proportion_cibersort == "S1"),]
+cibersort_output_metadata[which(cibersort_output_metadata$max_proportion_cibersort == "S3"),]
+cibersort_output_metadata[which(cibersort_output_metadata$max_proportion_cibersort == "S4"),]
+
+```
+
