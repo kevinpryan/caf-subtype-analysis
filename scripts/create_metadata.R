@@ -27,6 +27,12 @@ EGAD_4810 <- read.table(file_4810,
                         sep = ";")
 EGAD_4810_cancers <- str_split_fixed(EGAD_4810$V1, pattern = "=", n = 2)[,2]
 EGAD_4810_keep <- which(EGAD_4810_cancers == "BC")
+EGAD_4810_remove <- which(EGAD_4810_cancers != "BC")
+
+print("removing samples: ")
+print(EGAD_4810[EGAD_4810_remove,][,4])
+EGAD_4810_removed <- EGAD_4810[EGAD_4810_remove,]
+
 EGAD_4810_filtered <- EGAD_4810[EGAD_4810_keep,]
 EGAD_4810_meta <- data.frame(
   Sample = str_split_fixed(EGAD_4810_filtered$V4, pattern = "=", n = 2)[,2],
@@ -68,6 +74,8 @@ file_5744 <- paste(basedir, "EGAD00001005744/metaData_Pelon_et_al.txt", sep = ""
 EGAD_5744 <- read.table(file_5744, header =T, check.names = F)
 EGAD_5744$Sample.Name <- gsub(pattern = "\\.", replacement = "-", x = EGAD_5744$Sample.Name )
 EGAD_5744_filtered <- EGAD_5744[!(EGAD_5744$subset == "EPCAM+") & (EGAD_5744$Type == "T"),]
+EGAD_5744_to_remove <- EGAD_5744[(EGAD_5744$subset == "EPCAM+") | (EGAD_5744$Type == "LN"),]
+
 EGAD_5744_meta <- data.frame(
   Sample = EGAD_5744_filtered$Sample.Name,
   Study = "EGAD00001005744",
@@ -77,6 +85,7 @@ EGAD_5744_meta <- data.frame(
   directory = paste(basedir, "nfcore_results/EGAD00001005744_nfcore_results/star_salmon", sep = ""),
   row.names = 1
 )
+
 file_barkley <- paste(basedir, "InHouse/reformat_samples.csv", sep= "")
 barkley_samples <- read.csv(file_barkley, header = T, row.names = "samples", check.names = F)
 barkley_samples_meta <- data.frame(
@@ -91,6 +100,10 @@ barkley_samples_meta <- data.frame(
 metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
                              EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
 metadata$Tumor_JuxtaTumor <- gsub(x = metadata$Tumor_JuxtaTumor, pattern = "-", replacement = "")
+
+samples_not_included_in_analysis <- c(EGAD_5744_to_remove$Sample.Name, str_split_fixed(EGAD_4810_removed$V4, n = 2, pattern = "=")[,2]) 
+#write.table(samples_not_included_in_analysis, file = "/home/kevin/Documents/PhD/CAF_data/samples_not_included_in_analysis_2022-10-14.txt", quote = F, row.names = F, col.names = F)
+paste(samples_not_included_in_analysis, collapse = "|")
 write.table(metadata, file = out_full, quote = F, sep = "\t", row.names = T)
 
 metadata_no_inhouse <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 

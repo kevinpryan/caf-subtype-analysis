@@ -18,6 +18,9 @@ library(cowplot)
 library(tidyr)
 library(dplyr)
 library(biomaRt)
+library(stringr)
+library(RColorBrewer)
+library(forcats)
 ```
 
 ```{r include=FALSE}
@@ -72,18 +75,40 @@ cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_
 ```{r echo=FALSE}
 cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
 cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
-cibersort_plot_online <- ggplot(cibersort_results_long_online, 
-                                aes(x = as.character(Mixture), y = value, fill = Subpopulation)) +
-  geom_col() + 
-  ggtitle("CIBERSORT results online") +   
-  theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 8, angle = 90)) +
-  xlab("Mixture") + 
-  ylab("Proportion") +
+cibersort_results_long_online <- inner_join(cibersort_results_long_online, metadata, by = "Mixture")
+cibersort_results_long_online <- cibersort_results_long_online %>% 
+                                mutate(Subpopulation = str_replace(Subpopulation,
+                                    "S1", "S1 myofibroblastic"),
+                                  Subpopulation = str_replace(Subpopulation,
+                                    "S3", "S3 normal-like"),
+                                  Subpopulation = str_replace(Subpopulation,
+                                    "S4", "S4 inflammatory"),
+                                  value = value*100
+                                  )
+                                
+cibersort_plot_online <- cibersort_results_long_online %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Condition, y = value, fill = Subpopulation)) +
+  geom_col() +
+  facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 6)) +
+  ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(3, "Dark2"), "gray")
+                    ) +
+  xlab("Patient") + 
+  ylab("Subpopulation composition (%)") +
   theme(#panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(), 
-        axis.line = element_line(colour = "black")) +
-      scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) + 
+      scale_y_continuous(expand = c(0,0)) +
+  geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") #+ 
+ # labs(tag = "TAN = Tumour-associated normal\nCAF=Cancer-associated fibroblast") +
+  #  theme(plot.tag.position = c(0.9, 0.3),)
+
+  #+
+     # scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
 ```
 
 ```{r}
@@ -91,12 +116,12 @@ cibersort_plot_online
 ```
 
 ```{r echo=FALSE}
-outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".png", sep = "")
-#ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online)
+outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".tiff", sep = "")
+ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online, width = 10, height = 7)
 ```
 
 ```{r echo=FALSE}
-#print(paste("saved to ...", outfile.plot.name))
+print(paste("saved to ...", outfile.plot.name))
 ```
 
 ## CIBERSORT results docker

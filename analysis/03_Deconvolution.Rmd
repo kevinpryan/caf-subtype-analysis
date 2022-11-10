@@ -26,6 +26,8 @@ library(cowplot)
 
 CIBERSORT requires TPM as input, therefore we need to convert our batch corrected counts to TPM. To get the gene lengths for this, we will use the effective gene lengths from the Salmon output. Therefore, we must use the ENGS gene id version.
 
+
+
 ## Generate inputs to CIBERSORT
 
 The function `tpm.convert` is used to convert the counts to TPM.
@@ -166,4 +168,6 @@ row.names(out) <- c("S1", "S3", "S4")
 outfile.name <-  paste("intermediate_files/cibersort/phenoclasses_caf_", Sys.Date(), ".txt", sep = "")
 #write.table(out, file = here(outfile.name), sep = "\t", quote = F, col.names = F)
 ```
+
+
 

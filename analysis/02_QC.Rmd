@@ -21,8 +21,27 @@ library(PCAtools)
 library(sva)
 ```
 
+# Read in data
 
-```{r echo=F}
+Samples were processed with nf-core/rnaseq version `3.8.1`.
+
+Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
+
+```{r Functions, echo=F}
+filter_out_low_expressed <- function(dds){
+  print(paste("no of genes before filtering...", nrow(dds)))
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+
 svaBatchCor <- function(dat, mmi, mm0,n.sv=NULL, svs.include = NULL){
     dat <- as.matrix(dat)
     Y <- t(dat)
@@ -38,28 +57,7 @@ svaBatchCor <- function(dat, mmi, mm0,n.sv=NULL, svs.include = NULL){
     o$corrected <- t(Y - W %*% alpha)
     return(o)
 }
-```
 
-# Read in data
-
-Samples were processed with nf-core/rnaseq version `3.8.1`.
-
-Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
-
-```{r Functions}
-filter_out_low_expressed <- function(dds){
-  print(paste("no of genes before filtering...", nrow(dds)))
-  # returns a vector of whether the total count of each gene is >= 10 (True or false)
-  keep <- rowSums(counts(dds)) >= 10
-  # only keep rows (genes) for which keep is TRUE
-  dds <- dds[keep,]
-  # at least X samples with a count of 10 or more, where X is 5% of samples
-  X <- round(0.05*ncol(dds))
-  keep <- rowSums(counts(dds) >= 10) >= X
-  dds <- dds[keep,]
-  print(paste("no of genes after filtering...", nrow(dds)))
-  return(dds)
-}
 ```
 
 ```{r Prepare to read in data, include = FALSE}
@@ -376,7 +374,7 @@ print("not writing to file")
 
 ### Surrogate variable analysis
 
-#### SVA removes biological signal
+#### SVA seems to remove biological signal
 
 Is surrogate variable analysis required on the batch-corrected data? Does it remove the biological signal completely?
 
@@ -428,6 +426,7 @@ vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse <- vst(dds.ensg.remove.o
 ```{r Remove SVs to see if biological variation remains after removal}
 counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs <- svaBatchCor(counts.ensg.remove.outliers.batch.corrected.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 22)$corrected
 pca.metadata <- colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)[,1:4]
+# how to do VST outside deseq2? counts are not in a DEseq2 object
 pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs <- pca(counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs, metadata = pca.metadata)
 ```
 
@@ -440,7 +439,81 @@ eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.s
              main = "Correlation between PCs and variables of interest\nafter batch correction with Combat-Seq\nand removal of surrogate variables", cexMain = 1.5)
 ```
 
-From the above we can see that when we include surrogate variables, we lose our biological signal.
+From the above we can see that when we include surrogate variables, we lose much of our biological signal.
+
+#### What if we do SVA on the non batch-corrected data?
+
+```{r}
+keep <- which(colData(dds.ensg.remove.outliers)$Subpopulation != "Unknown")
+dds.ensg.remove.outliers.no.inhouse <- dds.ensg.remove.outliers[,keep]
+dds.ensg.remove.outliers.no.inhouse <- DESeq(dds.ensg.remove.outliers.no.inhouse)
+# write to file
+outfile.ensg.no.inhouse <- paste("../intermediate_files/dds_not_corrected_remove_outliers_ensg_", date, ".Rds", sep = "")
+
+#saveRDS(dds.ensg.remove.outliers.no.inhouse, file = outfile.ensg.no.inhouse)
+counts.ensg.remove.outliers.batch.no.inhouse  <- counts(dds.ensg.remove.outliers.no.inhouse, normalized = TRUE)
+idx  <- rowMeans(counts.ensg.remove.outliers.batch.no.inhouse) > 1
+counts.ensg.remove.outliers.batch.no.inhouse  <- counts.ensg.remove.outliers.batch.no.inhouse[idx, ]
+```
+
+```{r surrogate variable analysis non batch corrected}
+mod <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds.ensg.remove.outliers.no.inhouse))
+mod0 <- model.matrix(~ 1, colData(dds.ensg.remove.outliers.no.inhouse))
+svseq_no_inhouse_non_corrected <- svaseq(counts.ensg.remove.outliers.batch.no.inhouse, mod, mod0) # use number of surrogate variables determined by the package, number is 21
+
+colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation)
+
+sv_names <- paste("SV", seq(1,svseq_no_inhouse_non_corrected$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+  colData(dds.ensg.remove.outliers.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse$sv[,i]
+}
+
+design(dds.ensg.remove.outliers.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 +SV19 + SV20 + SV21 + Subpopulation
+
+counts.ensg.remove.outliers.no.inhouse.remove.svs <- svaBatchCor(counts.ensg.remove.outliers.batch.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 1)$corrected
+pca.metadata <- colData(dds.ensg.remove.outliers.no.inhouse)[,1:4]
+# how to do VST outside deseq2? counts are not in a DEseq2 object
+pca.counts.ensg.remove.outliers.no.inhouse.remove.svs <- pca(counts.ensg.remove.outliers.no.inhouse.remove.svs, metadata = pca.metadata)
+
+```
+
+```{r}
+PCAtools::biplot(pca.counts.ensg.remove.outliers.no.inhouse.remove.svs, lab = NULL, colby = "Study", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved")
+```
+
+```{r}
+counts.ensg.remove.outliers.no.inhouse.remove.svs.list <- list()
+counts.ensg.remove.outliers.no.inhouse.remove.svs.list.log2.plus.1 <- list()
+pca.metadata <- colData(dds.ensg.remove.outliers.no.inhouse)[,1:4]
+pca.counts.ensg.remove.outliers.no.inhouse.remove.svs.list <- list()
+eigencorplots <- list()
+for (i in 1:21){
+  sva.output <- svaBatchCor(counts.ensg.remove.outliers.batch.no.inhouse, mmi = mod, mm0 = mod0, n.sv = i)$corrected
+  counts.ensg.remove.outliers.no.inhouse.remove.svs.list[[i]] <- sva.output
+  sva.output.log2.plus.1 <- log2(sva.output + 1)
+  sva.output.log2.plus.1 <- sva.output.log2.plus.1[complete.cases(sva.output.log2.plus.1),]
+  counts.ensg.remove.outliers.no.inhouse.remove.svs.list.log2.plus.1[[i]] <- sva.output.log2.plus.1
+  pca.out <- pca(sva.output.log2.plus.1, metadata = pca.metadata)
+  pca.counts.ensg.remove.outliers.no.inhouse.remove.svs.list[[i]] <- pca.out
+  clinical.correlations <- eigencorplot(pca.out, metavars = colnames(pca.out$metadata), main = paste("n.sv:", i))
+  eigencorplots[[i]] <- clinical.correlations
+}
+```
+
+Starting at 1 surrogate variable, the resulting eigencorplot resulting from adding 1 surrogate variable was examined. The first one without a significant correlation between PCs and study was n.sv = 9. 
+
+```{r}
+eigencorplots[[9]]
+```
+
+We can see from the PCA plot that when we include 9 surrogate variables, we get some separation by subpopulation, and good mixing between the studies.
+
+```{r}
+PCAtools::biplot(pca.counts.ensg.remove.outliers.no.inhouse.remove.svs.list[[9]], lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved, n.sv = 9")
+
+PCAtools::biplot(pca.counts.ensg.remove.outliers.no.inhouse.remove.svs.list[[9]], lab = NULL, colby = "Study", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved, n.sv = 9")
+```
 
 #### Which SVs are correlated with the labels?
 
@@ -508,3 +581,7 @@ eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.s
 ```{r}
 PCAtools::biplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6, lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nbatch-corrected data with surrogate variables\nremoved SV6 SV8")
 ```
+
+
+
+
