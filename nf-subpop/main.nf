@@ -65,15 +65,15 @@ process MATCH_BY_PATIENT {
     path(exclude_files) // ch_exclude_files
     //path(hlatyping_dir) // ch_hlatyping_dir
     output:
-    //path("metadata_with_patient.txt"), emit: ch_metadata_with_patient
+    path("metadata_with_patient.txt"), emit: ch_metadata_with_patient
     path("HLAtyping_pipeline.html"), emit: ch_hla_match
     shell:
         script = "rmarkdown::render('HLAtyping_pipeline.Rmd',"
         script += "params = list("
         script += "metadata = '\$PWD/${metadata}', "
-        script += "indir = '\$PWD/${hlatyping_dir}', "
         script += "files_to_exclude = '\$PWD/${exclude_files}', "
-        script += "all_files = '\$PWD/${hlatyping_output}'), "
+        script += "method = 'nextflow', "
+        script += "hlatyping_in = '\$PWD/${hlatyping_output}'),"
         script += ")"
     """
     cp -L ${projectDir}/bin/HLAtyping_pipeline.Rmd HLAtyping_pipeline.Rmd 
@@ -81,6 +81,7 @@ process MATCH_BY_PATIENT {
     """
 
 }
+
 process QC {
     publishDir "$params.outdir/qc"
     stageInMode 'copy'
@@ -89,21 +90,23 @@ process QC {
     input:
     path(metadata) // ch_metadata
     path(tx2gene) // ch_tx2gene
-
+    path(inhouse_metadata) // ch_inhouse_metadata
     output:
     // TODO
     path("out.txt"), emit: ch_qc_out
     path("QC_pipeline.md")
     path("QC_pipeline.html")
     path("metadata_outliers_removed_ensembl_gene_id_version.txt"), emit: ch_metadata_outliers_removed
-    path("dds_remove_outliers_batch_corrected.Rds"), emit: ch_dds_remove_outliers_batch_corrected
-    path("dds_not_corrected_remove_outliers_no_inhouse.Rds"), emit: ch_dds_not_corrected_no_inhouse
+    //path("dds_remove_outliers_batch_corrected.Rds"), emit: ch_dds_remove_outliers_batch_corrected
+    //path("dds_not_corrected_remove_outliers_no_inhouse.Rds"), emit: ch_dds_not_corrected_no_inhouse
     //script:
     shell:
         script = "rmarkdown::render('QC_pipeline.Rmd',"
         script += "params = list("
         script += "metadata = '\$PWD/${metadata}', "
         script += "tx2gene = '\$PWD/${tx2gene}', "
+        script += "inhouse_metadata = '\$PWD/${inhouse_metadata}', "
+        script += "method = 'nextflow', "
         script += "out = 'out.txt'),"
         script += ")"
     """
@@ -135,13 +138,10 @@ ch_out_full = Channel.of(params.metadata_out_full)
 ch_out_reduced = Channel.of(params.metadata_out_reduced)
 ch_basedir = Channel.of(params.basedir)
 ch_gtf = Channel.fromPath(params.gtf, checkIfExists: true)
-//ch_hlatyping = Channel.fromPath(params.hlatyping_output, checkIfExists: true)
-//ch_hlatyping.view()
-
 ch_hlatyping = Channel.fromPath( params.hlatyping_output ) 
+ch_inhouse_metadata = Channel.fromPath(params.inhouse_metadata, checkIfExists: true)
 
-
-ch_hlatyping_dir = Channel.fromPath(params.hlatyping_outdir)
+//ch_hlatyping_dir = Channel.fromPath(params.hlatyping_outdir)
 
 
 //ch_hlatyping.view()
@@ -159,13 +159,7 @@ ch_exclude_files = Channel.fromPath(params.exclude_files, checkIfExists: true)
 
 
 workflow {
-HLATYPING_ADD_SAMPLENAME(ch_hlatyping)
 
-ch_merged_hlatyping_calls = HLATYPING_ADD_SAMPLENAME.out.ch_hla_samplename_added
-                            .collectFile(name: 'combined_hla_calls.txt', newLine: true)
-                        
-
-/*
 if (!params.metadata){
     // TODO run generate_metadata 
     println "no metadata provided, generating..."
@@ -176,7 +170,6 @@ if (!params.metadata){
 } else {
     println "metadata provided, not generating..."
     ch_metadata = Channel.fromPath(params.metadata, checkIfExists: true)
-    ch_metadata.view()
 }
 
 if (!params.tx2gene){
@@ -189,18 +182,21 @@ if (!params.tx2gene){
     ch_tx2gene = Channel.fromPath(params.tx2gene, checkIfExists: true)
 }
 
+HLATYPING_ADD_SAMPLENAME(ch_hlatyping)
+
+ch_merged_hlatyping_calls = HLATYPING_ADD_SAMPLENAME.out.ch_hla_samplename_added
+                            .collectFile(name: 'combined_hla_calls.txt', newLine: true)
+                     
 MATCH_BY_PATIENT(
     ch_metadata,
-    ch_hlatyping.collect(),
-    ch_exclude_files,
-    ch_hlatyping_dir
+    ch_merged_hlatyping_calls,
+    ch_exclude_files
 )
-/*
+
+
 QC(
-    ch_metadata,
-    ch_tx2gene
+    MATCH_BY_PATIENT.out.ch_metadata_with_patient,
+    ch_tx2gene,
+    ch_inhouse_metadata
 )
-*/
-
-
 }
