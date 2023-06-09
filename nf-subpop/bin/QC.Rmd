@@ -1,0 +1,23 @@
+---
+title: "QC"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+---
+
+## bibliography: citations.bib  
+
+```{r include=FALSE}
+library(here)
+library(biomaRt)
+library(tximeta)
+library(DESeq2)
+library(ggplot2)
+library(PCAtools)
+library(sva)
+```
+
+```{r}
+print("testing")
+```

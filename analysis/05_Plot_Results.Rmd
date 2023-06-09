@@ -21,6 +21,9 @@ library(biomaRt)
 library(stringr)
 library(RColorBrewer)
 library(forcats)
+library(gt)
+library(gtable)
+#library(gtExtras)
 ```
 
 ```{r include=FALSE}
@@ -43,10 +46,20 @@ getBM.call <- function(vec){
 # CIBERSORT
 
 ```{r Read in metadata}
-metadata <- read.csv(file = here("intermediate_files/metadata/reformat_samples_extra_info.csv"))
+#metadata <- read.csv(file = here("intermediate_files/metadata/reformat_samples_extra_info.csv"))
+metadata <- read.csv(file = here("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/metadata/reformat_samples_extra_info.csv"))
+
 colnames(metadata)[1] <- "Mixture"
 metadata$Mixture <- as.character(metadata$Mixture)
 metadata$Condition <- ifelse(metadata$Condition == "Tumour", "CAF", "TAN")
+wes_samples <- as.character(c(3532,3533,4027,4028,4033,4034,4112,4113,4315,4316,4340,4341))
+WES <- rep(FALSE, 24)
+for (i in 1:length(metadata$Mixture)){
+  if (metadata$Mixture[i] %in% wes_samples){
+    WES[i] <- TRUE
+  }
+}
+metadata$WES <-WES
 ```
 
 ## CIBERSORT results online
@@ -56,10 +69,13 @@ metadata$Condition <- ifelse(metadata$Condition == "Tumour", "CAF", "TAN")
 ```{r Look at signature matrix made by CIBERSORT}
 mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
                 host="useast.ensembl.org")
-sig.matrix <- read.table(here("intermediate_files/cibersort/CIBERSORTx_Job15_phenoclasses_caf_2022-10-07.CIBERSORTx_Job15_caf_tpm_for_signature_engs_version_batch_corrected_2022-10-07.bm.K999.txt"), header = T)
+#sig.matrix <- read.table(here("intermediate_files/cibersort/CIBERSORTx_Job15_phenoclasses_caf_2022-10-07.CIBERSORTx_Job15_caf_tpm_for_signature_engs_version_batch_corrected_2022-10-07.bm.K999.txt"), header = T)
+sig.matrix <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/CIBERSORTx_Job15_phenoclasses_caf_2022-10-07.CIBERSORTx_Job15_caf_tpm_for_signature_engs_version_batch_corrected_2022-10-07.bm.K999.txt", header = T)
+
 biomart.output <- getBM.call(sig.matrix$NAME)
 sig.matrix$hgnc_symbol <- biomart.output$hgnc_symbol
 ```
+
 
 The only CAF marker found in the signature matrix is ACTA2 (alphaSMA), which has higher expression in S4 in this signature matrix
 
@@ -68,21 +84,42 @@ sig.matrix[sig.matrix$hgnc_symbol == "ACTA2",]
 ```
 
 ```{r echo=FALSE}
-cibersort_output <- read.csv(here("intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv"))
+cibersort_output <- read.csv("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv")
 cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
+range(cibersort_output$Correlation)
+mean(cibersort_output$Correlation)
+```
+
+```{r}
+cibersort_output_absolute <- read.csv("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/CIBERSORTx_Job17_Results_20230518_absolutemode.csv")
+cibersort_output_absolute$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
+range(cibersort_output$Correlation)
+mean(cibersort_output$Correlation)
+```
+
+```{r}
+plot( cibersort_output$Correlation,cibersort_output$S3)
+plot( cibersort_output$Correlation,cibersort_output$S4)
+plot( cibersort_output$Correlation,cibersort_output$S1)
+
+cor.test(cibersort_output$Correlation,cibersort_output$S3)
+cor.test(cibersort_output$Correlation,cibersort_output$S1)
+cor.test(cibersort_output$Correlation,cibersort_output$S4)
+
 ```
 
 ```{r echo=FALSE}
 cibersort_results_long_online <- pivot_longer(cibersort_output, cols = c(S1, S3, S4), names_to = "Subpopulation")
 cibersort_results_long_online$Mixture <- as.character(cibersort_results_long_online$Mixture)
+#cibersort_results_long_online$WES <- 
 cibersort_results_long_online <- inner_join(cibersort_results_long_online, metadata, by = "Mixture")
 cibersort_results_long_online <- cibersort_results_long_online %>% 
                                 mutate(Subpopulation = str_replace(Subpopulation,
-                                    "S1", "S1 myofibroblastic"),
+                                    "S1", "S1 immunosuppressive-\nmyofibroblastic"),
                                   Subpopulation = str_replace(Subpopulation,
                                     "S3", "S3 normal-like"),
                                   Subpopulation = str_replace(Subpopulation,
-                                    "S4", "S4 inflammatory"),
+                                    "S4", "S4 myofibroblastic"),
                                   value = value*100
                                   )
                                 
@@ -91,19 +128,27 @@ cibersort_plot_online <- cibersort_results_long_online %>%
   ggplot(aes(x = Condition, y = value, fill = Subpopulation)) +
   geom_col() +
   facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
-    theme(plot.title = element_text(hjust = 0.5),  axis.text = element_text(size = 6)) +
-  ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          #axis.text.y = element_text(size = 12, face = "bold"), 
+          #axis.text.x = element_text(size = 8),
+          #strip.text.y = element_text(size = rel(100))
+          #) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
     scale_fill_manual(name=NULL,
                     values = c(brewer.pal(3, "Dark2"), "gray")
                     ) +
-  xlab("Patient") + 
-  ylab("Subpopulation composition (%)") +
+  xlab(label = "Patient") + 
+  ylab("CIBERSORTx subpopulation composition (%)") +
   theme(#panel.grid.major = element_blank(), 
         #panel.grid.minor = element_blank(),
         panel.background = element_blank(),
         axis.line = element_line(colour = "black")) + 
       scale_y_continuous(expand = c(0,0)) +
-  geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") #+ 
+  geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8))
+
+
  # labs(tag = "TAN = Tumour-associated normal\nCAF=Cancer-associated fibroblast") +
   #  theme(plot.tag.position = c(0.9, 0.3),)
 
@@ -112,12 +157,122 @@ cibersort_plot_online <- cibersort_results_long_online %>%
 ```
 
 ```{r}
+cibersort_plot_online <- cibersort_plot_online + theme(axis.text.x=element_text(angle=60, hjust=1))
 cibersort_plot_online
 ```
 
+```{r}
+cibersort_results_long_online_abs <- pivot_longer(cibersort_output_absolute, cols = c(S1, S3, S4), names_to = "Subpopulation")
+cibersort_results_long_online_abs$Mixture <- as.character(cibersort_results_long_online_abs$Mixture)
+#cibersort_results_long_online$WES <- 
+cibersort_results_long_online_abs <- inner_join(cibersort_results_long_online_abs, metadata, by = "Mixture")
+cibersort_results_long_online_abs <- cibersort_results_long_online_abs %>% 
+                                mutate(Subpopulation = str_replace(Subpopulation,
+                                    "S1", "S1 immunosuppressive-\nmyofibroblastic"),
+                                  Subpopulation = str_replace(Subpopulation,
+                                    "S3", "S3 normal-like"),
+                                  Subpopulation = str_replace(Subpopulation,
+                                    "S4", "S4 myofibroblastic")#,
+                                  #value = value*100
+                                  )
+                                
+cibersort_plot_online_abs <- cibersort_results_long_online_abs %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Condition, y = value, fill = Subpopulation)) +
+  geom_col() +
+  facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          #axis.text.y = element_text(size = 12, face = "bold"), 
+          #axis.text.x = element_text(size = 8),
+          #strip.text.y = element_text(size = rel(100))
+          #) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(3, "Dark2"), "gray")
+                    ) +
+  xlab(label = "Patient") + 
+  ylab("CIBERSORTx score absolute") +
+  theme(#panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) + 
+      scale_y_continuous(expand = c(0,0)) +
+  #geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8))
+
+```
+
+```{r}
+cibersort_plot_online_abs <- cibersort_plot_online_abs + theme(axis.text.x=element_text(angle=60, hjust=1))
+cibersort_plot_online_abs
+```
+
+```{r}
+cibersort_output_metadata_abs <- full_join(cibersort_output_absolute, metadata, by = "Mixture")
+
+```
+
+
+#### Make the same plot but highlight CAF Patient 2 - sample with SNVs from Sarek and those where WES was carried out - didn't use in the end
+
 ```{r echo=FALSE}
-outfile.plot.name <-  paste("outfiles/cibersort_results_online_", Sys.Date(), ".tiff", sep = "")
-ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online, width = 10, height = 7)
+cibersort_plot_online_highlight <- cibersort_results_long_online %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Condition, y = value, fill = Subpopulation, alpha = WES == TRUE)) +
+  geom_col() +
+  scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.7), guide = "none") +
+  
+  geom_col(data = subset(cibersort_results_long_online, Mixture == "4027", alpha=0, size=1, color="black")) +
+           
+           #cibersort_results_long_online[(cibersort_results_long_online$Mixture == "4027"),],        # filter
+#aes(Mixture), alpha=0, size=1, color="black")  +
+  
+  facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+  
+    #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          #axis.text.y = element_text(size = 12, face = "bold"), 
+          #axis.text.x = element_text(size = 8),
+          #strip.text.y = element_text(size = rel(100))
+          #) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(3, "Dark2"), "gray")
+                    ) +
+  xlab(label = "Patient") + 
+  ylab("Subpopulation composition (%)") +
+  theme(#panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) + 
+      scale_y_continuous(expand = c(0,0)) +
+  geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8)) 
+  
+
+
+
+ # labs(tag = "TAN = Tumour-associated normal\nCAF=Cancer-associated fibroblast") +
+  #  theme(plot.tag.position = c(0.9, 0.3),)
+
+  #+
+     # scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
+```
+
+```{r}
+cibersort_plot_online_highlight
+    
+```
+
+
+```{r echo=FALSE}
+outfile.plot.name <-  paste("~/Documents/PhD/subtypes/caf-subtype-analysis/outfiles/cibersort_results_online_", Sys.Date(), ".svg", sep = "")
+outfile.plot.name.png <-  paste("~/Documents/PhD/subtypes/caf-subtype-analysis/outfiles/cibersort_results_online_", Sys.Date(), ".png", sep = "")
+
+#ggsave(filename = here(outfile.plot.name), plot = cibersort_plot_online, width = 10, height = 7, dpi = 320, device = "svg")
+ggsave(filename = here(outfile.plot.name.png), plot = cibersort_plot_online, width = 10, height = 7, dpi = 320, device = "png")
+
 ```
 
 ```{r echo=FALSE}
@@ -127,7 +282,7 @@ print(paste("saved to ...", outfile.plot.name))
 ## CIBERSORT results docker
 
 ```{r echo=FALSE}
-cibersort_output_docker <- read.table(here("intermediate_files/cibersort/outputs/CIBERSORTx_Results.txt"), header = T)
+cibersort_output_docker <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/outputs/CIBERSORTx_Results.txt", header = T)
 cibersort_output_docker$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output_docker$Mixture)
 ```
 
@@ -153,7 +308,7 @@ cibersort_plot_docker
 ```
 
 ```{r echo=FALSE}
-outfile.plot.name.docker <-  paste("outfiles/cibersort_results_docker_", Sys.Date(), ".png", sep = "")
+outfile.plot.name.docker <-  paste("~/Documents/PhD/subtypes/caf-subtype-analysis/outfiles/cibersort_results_docker_", Sys.Date(), ".png", sep = "")
 #ggsave(filename = here(outfile.plot.name.docker), plot = cibersort_plot_docker)
 ```
 
@@ -182,7 +337,7 @@ cibersort_grid <- plot_grid(cibersort_plot_online + theme(legend.position = "non
       label_size = 15,
       align = 'h')
 cibersort_grid <- plot_grid(cibersort_grid, legend, rel_widths = c(3,.5))
-outfile.plot.name.combined <-  paste("outfiles/cibersort_plot_combined_batch_corrected_", Sys.Date(), ".png", sep = "")
+outfile.plot.name.combined <-  paste("~/Documents/PhD/subtypes/caf-subtype-analysis/outfiles/cibersort_plot_combined_batch_corrected_", Sys.Date(), ".png", sep = "")
 #ggsave(filename = here(outfile.plot.name.combined), 
  #      plot = cibersort_grid,
   #     width = 20,
@@ -256,25 +411,137 @@ ggplot(cibersort_output_metadata,
 
 ```{r}
 library("ggpubr")
-ggline(cibersort_output_metadata, x = "Condition", y = "S1", 
-       add = c("median", "jitter"), 
-          order = c("TAN", "CAF"),
-          ylab = "Proportion", xlab = "Condition",
-       title = "Line plot TAN CAF proportions S1\n Median marked")
+library(RColorBrewer)
 
-ggline(cibersort_output_metadata, x = "Condition", y = "S3", 
-       add = c("median", "jitter"), 
+cibersort_output_metadata %>% mutate(S1 = S1*100) %>% 
+        ggboxplot(x = "Condition", y = "S1",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
           order = c("TAN", "CAF"),
-          ylab = "Proportion", xlab = "Condition",
-       title = "Line plot TAN CAF proportions S3\n Median marked")
+          ylab = "S1 percentage"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 90)
 
-ggline(cibersort_output_metadata, x = "Condition", y = "S4", 
-       add = c("median", "jitter"), 
+cibersort_output_metadata %>% mutate(S3 = S3*100) %>% 
+        ggboxplot(x = "Condition", y = "S3",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
           order = c("TAN", "CAF"),
-          ylab = "Proportion", xlab = "Condition",
-       title = "Line plot TAN CAF proportions S4\n Median marked")
+          ylab = "S3 percentage"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 90)
+
+cibersort_output_metadata %>% mutate(S4 = S4*100) %>% 
+        ggboxplot(x = "Condition", y = "S4",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          ylab = "S4 percentage"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 90)
+
+proportion_per_subpop_caf_tan_plot <- cibersort_output_metadata %>% pivot_longer(cols = c("S1", "S3", "S4"), names_to = "Subpopulation", values_to = "CIBERSORTx Percentage") %>% mutate("CIBERSORTx Percentage" = 100*`CIBERSORTx Percentage`) %>% 
+        ggboxplot(x = "Condition", y = "CIBERSORTx Percentage",
+          color = "Condition", 
+          #palette = c(brewer.pal(3, "Dark2"), "gray"),
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          facet.by = "Subpopulation"
+          ) + 
+         # ggtitle("Distribution of subpopulation proportions\nbetween TANs and CAFs") +
+      #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +  
+          stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 80, label = "p.format")
+   #scale_fill_manual(#name=NULL, 
+    #                 values = c(brewer.pal(3, "Dark2"), "gray"))
+proportion_per_subpop_caf_tan_plot
+outfile.plot.name.compare.tan.caf <- "outfiles/compare_tan_caf_proporions.svg"
+#ggsave(filename = here(outfile.plot.name.compare.tan.caf), plot = proportion_per_subpop_caf_tan_plot, width = 10, height = 7, dpi = 320, device = "svg")
+
+# ggline(x = "Condition", y = "S1", 
+#        add = c("median", "jitter"), 
+#           order = c("TAN", "CAF"),
+#           ylab = "S1 percentage", xlab = "Condition",
+#        title = "CAF S1") +
+#     theme(plot.title = element_text(hjust = 0.5)) +
+#    stat_compare_means(paired = TRUE)
+# 
+# 
+# ggline(cibersort_output_metadata, x = "Condition", y = "S3", 
+#        add = c("median", "jitter"), 
+#           order = c("TAN", "CAF"),
+#           ylab = "Proportion", xlab = "Condition",
+#        title = "Line plot TAN CAF proportions S3\n Median marked")
+# 
+# ggline(cibersort_output_metadata, x = "Condition", y = "S4", 
+#        add = c("median", "jitter"), 
+#           order = c("TAN", "CAF"),
+#           ylab = "Proportion", xlab = "Condition",
+#        title = "Line plot TAN CAF proportions S4\n Median marked")
 
 ```
+
+```{r}
+cibersort_output_metadata_abs %>% #mutate(S1 = S1*100) %>% 
+        ggboxplot(x = "Condition", y = "S1",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          ylab = "S1 score"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 35)
+
+cibersort_output_metadata_abs %>% #mutate(S3 = S3*100) %>% 
+        ggboxplot(x = "Condition", y = "S3",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          ylab = "S3 score"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 35)
+
+cibersort_output_metadata_abs %>% #mutate(S4 = S4*100) %>% 
+        ggboxplot(x = "Condition", y = "S4",
+          color = "Condition", 
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          ylab = "S4 score"
+          ) + stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 35)
+
+proportion_per_subpop_caf_tan_plot_abs <- cibersort_output_metadata_abs %>% pivot_longer(cols = c("S1", "S3", "S4"), names_to = "Subpopulation", values_to = "CIBERSORTx Score") %>% 
+  #mutate("CIBERSORTx Score" = 100*`CIBERSORTx Percentage`) %>% 
+        ggboxplot(x = "Condition", y = "CIBERSORTx Score",
+          color = "Condition", 
+          #palette = c(brewer.pal(3, "Dark2"), "gray"),
+          palette = "jco",
+          add = "jitter",
+          order = c("TAN", "CAF"),
+          facet.by = "Subpopulation"
+          ) + 
+         # ggtitle("Distribution of subpopulation proportions\nbetween TANs and CAFs") +
+      #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +  
+          stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 35, label = "p.format")
+   #scale_fill_manual(#name=NULL, 
+    #                 values = c(brewer.pal(3, "Dark2"), "gray"))
+proportion_per_subpop_caf_tan_plot_abs
+```
+
+```{r plot correlation value versus subpopulation proportions}
+# proportion_vs_correlation_per_subpop_plot <- cibersort_output_metadata %>% pivot_longer(cols = c("S1", "S3", "S4"), names_to = "Subpopulation", values_to = "CIBERSORTx Percentage") %>% mutate("CIBERSORTx Percentage" = 100*`CIBERSORTx Percentage`) %>% 
+#         ggboxplot(x = "Subpopulation", y = "Correlation",
+#           #color = "Condition", 
+#           #palette = c(brewer.pal(3, "Dark2"), "gray"),
+#           palette = "jco",
+#           add = "jitter",
+#           order = c("TAN", "CAF"),
+#           facet.by = "Subpopulation"
+#           ) + 
+#          # ggtitle("Distribution of subpopulation proportions\nbetween TANs and CAFs") +
+#       #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +  
+#           stat_compare_means(paired = TRUE, method = "wilcox.test", label.x = 1.4, label.y = 80, label = "p.format")
+```
+
 
 ```{r Plot paired data}
 
@@ -290,6 +557,63 @@ ggline(cibersort_output_metadata, x = "Condition", y = "S4",
 #plot(pd, type = "profile") + theme_bw()
 ```
 
+### make multi panel figure
+
+```{r}
+library(patchwork)
+proportion_per_subpop_caf_tan_plot
+cibersort_plot_online
+f1_scores <- readRDS("../outfiles/f1_scores_2022-11-22.Rds")
+#nested <- ((cibersort_plot_online|f1_scores) / proportion_per_subpop_caf_tan_plot)+ plot_annotation(tag_levels = 'A') DIDN'T WORK 20230518
+outfile.plot.combined <- "outfiles/combined_results_cibersort_20221123.svg"
+#ggsave(filename = here(outfile.plot.combined), plot = nested, width = 10, height = 7, dpi = 320, device = "svg")
+```
+
+## make f1 score plot from mlseq
+
+```{r}
+f1.scores <- read.csv("../outfiles/f1_scores_2022-11-23.txt", header = T, row.names = 1, check.names = F)
+colnames(f1.scores)[4] <- "Random\nforest"
+plot.out <- as.data.frame(t(f1.scores)) %>% 
+  mutate(ML.Method = colnames(f1.scores)) %>% 
+ pivot_longer(cols = c("S1", "S3", "S4"), names_to = "Subpopulation") %>% 
+ggplot(aes(fill=Subpopulation, y=value, x=ML.Method)) + 
+    #geom_bar(position="dodge", stat="identity") +
+  geom_col(position = "dodge", width = 0.7)+
+  xlab("Method") +
+ ylab("F1 Score") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),  axis.text = element_text(size = 10)) +
+  #ggtitle("F1 Scores for classifying CAF subpopulations using MLSeq") +
+      scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(3, "Dark2"), "gray")) +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        axis.text = element_text(size = 8)) +
+        #axis.text = element_text(size = 8, angle = 90)) +
+        scale_y_continuous(expand = c(0,0), limits = c(0, 1)) #+
+plot.out
+  
+#ggsave(plot.out, filename = "../outfiles/f1_scores_2022-11-22.tiff")
+```
+
+
+
+```{r}
+library(ggpubr) #load in library for multi-panel figures
+#put all three plots together into one multipanel plot
+title.f1.plot <- "F1 Scores for classifying CAF subpopulations using MLSeq"
+
+multi_plot <- ggarrange(cibersort_plot_online,
+                       ggarrange(plot.out, proportion_per_subpop_caf_tan_plot, labels = c( "B", "C"), ncol = 2),
+                       labels = "A", nrow = 2)
+                       #does the plot have a common legend
+#add titles and labels to the multi-panel graph
+multi_plot <- annotate_figure(multi_plot)
+                              #top = text_grob("Measurements of Penguin Species", color = "black", face = "bold", size = 11))
+multi_plot
+#ggsave(multi_plot, filename = "../outfiles/figure_plots_caf_subpop_2022-11-23.svg",  width = 10, height = 7, dpi = 320, device = "svg")
+```
+
 
 ### Significance tests
 
@@ -298,6 +622,10 @@ ggline(cibersort_output_metadata, x = "Condition", y = "S4",
 shapiro.test(cibersort_output_metadata$S1)
 shapiro.test(cibersort_output_metadata$S3)
 shapiro.test(cibersort_output_metadata$S4)
+
+shapiro.test(cibersort_output_absolute$S1)
+shapiro.test(cibersort_output_absolute$S3)
+shapiro.test(cibersort_output_absolute$S4[1:22])
 
 ```
 
@@ -325,19 +653,26 @@ group_by(cibersort_output_metadata, Condition) %>%
 ```
 
 ```{r}
-s1.test <- wilcox.test(S1 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
-s3.test <- wilcox.test(S3 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
-s4.test <- wilcox.test(S4 ~ Condition, data = cibersort_output_metadata, paired = TRUE)$p.value
+s1.test <- wilcox.test(S1 ~ Condition, data = cibersort_output_metadata, paired = TRUE, alternative = "two.sided")$p.value
+s3.test <- wilcox.test(S3 ~ Condition, data = cibersort_output_metadata, paired = TRUE, alternative = "two.sided")$p.value
+s4.test <- wilcox.test(S4 ~ Condition, data = cibersort_output_metadata, paired = TRUE, alternative = "two.sided")$p.value
 p.values <- c(s1.test, s3.test, s4.test)
 wilcox_results <- data.frame(Subpopulation = c("S1", "S3", "S4"), p.value = p.values, p.adj = p.adjust(p.values, method = "bonferroni"))
 wilcox_results
 ```
 
-We can see that there might be a difference in S4 proportions between CAF and TANs, but that it is not statistically significant using a paired Wilcoxon signed rank test. That is, we are unable to reject the null hypothesis that the difference proportion of the S4 subpopulation in CAFs and TANs is zero.
+We can see that there might be a difference in S4 proportions between CAF and TANs, but that it is not statistically significant using a paired Wilcoxon signed rank test. That is, we are unable to reject the null 
+hypothesis that the difference proportion of the S4 subpopulation in CAFs and TANs is zero.
 
 ```{r}
-cibersort_output_metadata
+s1.test.abs <- wilcox.test(S1 ~ Condition, data = cibersort_output_metadata_abs, paired = TRUE, alternative = "two.sided")$p.value
+s3.test <- wilcox.test(S3 ~ Condition, data = cibersort_output_metadata_abs, paired = TRUE, alternative = "two.sided")$p.value
+s4.test <- wilcox.test(S4 ~ Condition, data = cibersort_output_metadata_abs, paired = TRUE, alternative = "two.sided")$p.value
+p.values <- c(s1.test, s3.test, s4.test)
+wilcox_results <- data.frame(Subpopulation = c("S1", "S3", "S4"), p.value = p.values, p.adj = p.adjust(p.values, method = "bonferroni"))
+wilcox_results
 ```
+
 
 ```{r}
 max.proportion <- c()
@@ -351,4 +686,313 @@ cibersort_output_metadata[which(cibersort_output_metadata$max_proportion_ciberso
 cibersort_output_metadata[which(cibersort_output_metadata$max_proportion_cibersort == "S4"),]
 
 ```
+
+## Combine results
+
+```{r}
+create_empty_table <- function(num_rows, num_cols) {
+    frame <- data.frame(matrix(NA, nrow = num_rows, ncol = num_cols))
+    return(frame)
+}
+```
+
+```{r}
+sigscore.results <- read.table("../outfiles/singscore_results.txt")
+mlseq.results <- readRDS("../outfiles/mlseq.results.2022-11-17.Rds")
+df.mlseq.predictions <- create_empty_table(num_rows = 24, num_cols = (length(mlseq.results)+1))
+df.mlseq.predictions[,1] <- names(mlseq.results[[1]]$Predictions)
+colnames(df.mlseq.predictions)[1] <- "Mixture"
+for (i in 1:length(mlseq.results)){
+  df.mlseq.predictions[,i+1] <- mlseq.results[[i]]$Predictions
+}
+colnames(df.mlseq.predictions)[2:(length(mlseq.results)+1)] <- names(mlseq.results)
+cibersort_output_metadata <- cibersort_output_metadata %>% mutate(Predicted.subpop.sigscore = sigscore.results$Predicted.subpop) %>% full_join(df.mlseq.predictions)
+cibersort_output_metadata_longer <- cibersort_output_metadata %>%  pivot_longer(cols = c(S1, S3, S4), names_to = "Proportion") %>% mutate(value = round(100*value, 0))
+#library(gtextras)
+#caf_subpopulation_gtable <- cibersort_output_metadata_longer %>% group_by(Mixture) %>% summarise(list_data = list(value)) %>% gt() %>% tab_header(title = md("**CAF Subpopulation Proportions**"),subtitle = md("*Determined by CIBERSORTx*")) %>%  gt_plt_bar_stack(list_data, width = 65, labels = c("S1 immunosuppressive", "S3 normal-like", "S4 myofibroblastic"), palette= c("#ff4343", "#bfbfbf", "#0a1c2b")) 
+#gtsave(caf_subpopulation_gtable, file = "../outfiles/gtable_stacked_charts.png")
+
+#%>%  gt_theme_538()
+```
+
+```{r}
+percentage_overlap <- round(100*(length(which((cibersort_output_metadata$max_proportion_cibersort == cibersort_output_metadata$Predicted.subpop.sigscore) == TRUE))/nrow(cibersort_output_metadata)), 2)
+print(paste("Percentage overlap between max subpopulation CIBERSORT and max gene signature score: ", percentage_overlap, "%"))
+```
+
+```{r}
+player_df <- tibble(
+  player = c(
+    "Evan Mobley",
+    "Sandro Mamukelashvili",
+    "Charles Bassey",
+    "Luke Garza",
+    "Moses Wright",
+    "Neemias Queta",
+    "Isaiah Jackson",
+    "Day'Ron Sharpe"
+  ),
+  team = c(
+    "USC", "Seton Hall", "Western Kentucky",
+    "Iowa", "Georgia Tech", "Utah St", "Kentucky",
+    "North Carolina"
+  ),
+  ht = c(
+    "7'0\"",
+    "6'10\"",
+    "6'10\"",
+    "6'11\"",
+    "6'9\"",
+    "7'1\"",
+    "6'11\"",
+    "6'10\""
+  ),
+  dk_pct_time = c(40, 48, 50, 50, 51, 55, 60, 66),
+  dk_pps = c(1.62, 1.02, 1.54,1.33,1.46,1.37,1.33,1.18),
+  tip_pct_time = c(26, 10, 19, 15, 25, 27, 15, 24),
+  tip_pps = c(0.88, .97,1,1.05, .63, .85, .76, .84),
+  jmp_pct_time = c(33, 42, 31, 35, 25, 18, 25, 10),
+  jmp_pps = c(.91, .91, .78, 1.04, .86, .74, .71, .42)
+) %>%
+  left_join(
+    tibble(
+      player = c(
+        "Evan Mobley",
+        "Sandro Mamukelashvili",
+        "Charles Bassey",
+        "Luke Garza",
+        "Moses Wright",
+        "Neemias Queta",
+        "Isaiah Jackson",
+        "Day'Ron Sharpe"
+      ) %>% rep(each = 3),
+      shot_type = c("Dunks + Lays", "Hooks + Floats", "Jumpers") %>% rep(8)
+    ) %>%
+      mutate(
+        shot_type = factor(shot_type, levels = c("Jumpers", "Hooks + Floats", "Dunks + Lays")),
+        shot_mix = c(
+          40, 26, 33,
+          48, 10, 42,
+          50, 19, 31,
+          50, 15, 35,
+          51, 25, 25,
+          55, 27, 18,
+          60, 15, 25,
+          66, 24, 10
+        )
+      ),
+    by = "player"
+  )
+player_df %>% head()
+# basic_tb <- player_df %>%
+#   group_by(player) %>%
+#   summarize(dunks = shot_mix[1], list_data = list(shot_mix)) %>%
+#   arrange(dunks) %>%
+#   gt()
+# 
+# basic_tb %>%
+#   gt_plt_bar_stack(list_data, width = 65,
+#                    labels = c("DUNKS", "HOOKS/FLOATS", "JUMPERS"),
+#                    palette= c("#ff4343", "#bfbfbf", "#0a1c2b")) %>%
+#   gt_theme_538()
+```
+
+```{r}
+# library(gtExtras)
+cibersort_output_metadata_selected <- cibersort_output_metadata %>% dplyr::select(Patient, Condition, Subtype, max_proportion_cibersort, Predicted.subpop.sigscore, PLDA, PLDA2, NBLDA, `Random forest`, KNN, voomNSC)
+# gtab <- cibersort_output_metadata_selected %>% gt() %>% tab_header(
+#     title = "Subpopulation predictions",
+#     #subtitle = glue("{start_date} to {end_date}")
+#   )
+
+#gtsave(gtab, file = "../outfiles/gtable_all_predictions.png")
+
+```
+
+```{r}
+library(ggpmisc)
+cibersort_output_metadata_selected_combine <- cibersort_output_metadata %>% dplyr::select(Patient, Condition, max_proportion_cibersort, Predicted.subpop.sigscore, PLDA, PLDA2, NBLDA, `Random forest`, KNN, voomNSC)
+ggp_table <- ggplot() +                             # Create empty plot with table
+  theme_void() +
+  annotate(geom = "table",
+           x = 1,
+           y = 1,
+           label = list(cibersort_output_metadata_selected_combine))
+ggp_table     
+# cibersort_output_metadata_selected
+```
+
+```{r}
+majority_vote <- function(vec_pred, vec_classes){
+  len <- length(vec_pred)
+  print("vec classes ")
+  print(vec_classes)
+    print("vec pred ")
+    print(vec_pred)
+
+  stopifnot(all(vec_pred %in% vec_classes))
+  stopifnot(all(duplicated(vec_classes) == FALSE))
+  if (len < 2){
+    print("must provide a vector of predictions of length at least 2")
+    stop()
+  } else if (len %% 2 == 0){
+    print("even")
+    vec_classes_counts <- rep(0, length(vec_classes))
+    names(vec_classes_counts) <- vec_classes
+    # even
+    for (i in 1:len){
+      number <- length(vec_pred[which(vec_pred == vec_classes[i])])
+      vec_classes_counts[i] <- number
+    }
+    stopifnot(sum(vec_classes_counts) == len)
+    max_val <- max(vec_classes_counts)
+    if (max_val %in% vec_classes_counts[which(duplicated(vec_classes_counts) == TRUE)]){
+      # there is a tie
+      res <- c("Tie")
+      names(res) <- "Tie"
+    } else {
+      # not a tie
+      res <- names(which.max(vec_classes_counts))
+    }
+
+  } else {
+    # odd
+    print("odd")
+    vec_classes_counts <- rep(0, length(vec_classes))
+    names(vec_classes_counts) <- vec_classes
+    for (i in 1:len){
+      number <- length(vec_pred[which(vec_pred == vec_classes[i])])
+      vec_classes_counts[i] <- number
+    }
+    stopifnot(sum(vec_classes_counts) == len)
+    res <- names(which.max(vec_classes_counts))
+  }
+  print(res)
+  return(res)
+}
+#cibersort_output_metadata_selected_combine %>% 
+```
+
+```{r}
+# tests
+# should get Tie
+majority_vote(vec_pred = c("a", "b"), vec_classes = c("a", "b", "c"))
+# should get a
+majority_vote(vec_pred = c("a", "a"), vec_classes = c("a", "b", "c"))
+# should get a
+majority_vote(vec_pred = c("a", "a", "b"), vec_classes = c("a", "b", "c"))
+
+# should get S1
+cibersort_output_metadata_selected_combine_filt <- cibersort_output_metadata_selected_combine[,5:10]
+test.case <- unlist(cibersort_output_metadata_selected_combine_filt[1,])
+majority_vote(vec_pred = test.case, vec_classes = c("S1", "S3", "S4"))
+```
+
+```{r}
+results <- c(0, nrow(cibersort_output_metadata_selected_combine_filt))
+for (i in 1:nrow(cibersort_output_metadata_selected_combine_filt)){
+  results[i] <- majority_vote(vec_pred = unlist(cibersort_output_metadata_selected_combine_filt[i,]), vec_classes = c("S1", "S3", "S4"))
+}
+
+```
+
+```{r}
+cibersort_output_metadata_add_majority <- cibersort_output_metadata %>% mutate(ML_majority_vote = results)
+percent_ovelap_cibersort_max_majority_vote <- (100*length(which(cibersort_output_metadata_add_majority$max_proportion_cibersort == cibersort_output_metadata_add_majority$ML_majority_vote) == TRUE))/nrow(cibersort_output_metadata_add_majority)
+percent_ovelap_gene_sig_max_majority_vote <- (100*length(which(cibersort_output_metadata_add_majority$Predicted.subpop.sigscore == cibersort_output_metadata_add_majority$ML_majority_vote) == TRUE))/nrow(cibersort_output_metadata_add_majority)
+percent_na_majority_vote <- (100*length(cibersort_output_metadata_add_majority$ML_majority_vote[cibersort_output_metadata_add_majority$ML_majority_vote == "Tie"]))/nrow(cibersort_output_metadata_add_majority)
+percent_ovelap_gene_sig_cibersort <- (100*length(which(cibersort_output_metadata_add_majority$Predicted.subpop.sigscore == cibersort_output_metadata_add_majority$max_proportion_cibersort) == TRUE))/nrow(cibersort_output_metadata_add_majority)
+
+print(paste("overlap between cibersort and majority vote: ", percent_ovelap_cibersort_max_majority_vote, "%", sep = ""))
+print(paste("overlap between gene signature and majority vote: ", percent_ovelap_gene_sig_max_majority_vote, "%", sep = ""))
+print(paste("percent NAs in majority vote: ", percent_na_majority_vote, "%", sep = ""))
+print(paste("overlap between cibersort and gene signature: ", percent_ovelap_gene_sig_cibersort, "%", sep = ""))
+
+
+```
+
+
+
+```{r}
+cibersort_output_metadata_add_majority_predictions <- list(cibersort_output_metadata_add_majority$max_proportion_cibersort, cibersort_output_metadata_add_majority$Predicted.subpop.sigscore, as.character(cibersort_output_metadata_add_majority$PLDA), as.character(cibersort_output_metadata_add_majority$PLDA2), as.character(cibersort_output_metadata_add_majority$NBLDA), as.character(cibersort_output_metadata_add_majority$`Random forest`), as.character(cibersort_output_metadata_add_majority$KNN), as.character(cibersort_output_metadata_add_majority$voomNSC), cibersort_output_metadata_add_majority$ML_majority_vote)
+
+cibersort_output_metadata_add_majority_predictions_mat <- data.frame(cibersort_output_metadata_add_majority$max_proportion_cibersort, cibersort_output_metadata_add_majority$Predicted.subpop.sigscore, as.character(cibersort_output_metadata_add_majority$PLDA), as.character(cibersort_output_metadata_add_majority$PLDA2), as.character(cibersort_output_metadata_add_majority$NBLDA), as.character(cibersort_output_metadata_add_majority$`Random forest`), as.character(cibersort_output_metadata_add_majority$KNN), as.character(cibersort_output_metadata_add_majority$voomNSC), cibersort_output_metadata_add_majority$ML_majority_vote)
+#install.packages("UpSetR")
+#library(UpSetR)
+#upset_plot <- UpSetR::upset(fromList(cibersort_output_metadata_add_majority_predictions)) #, order.by = "freq", #main.bar.color = "skyblue",
+      #matrix.color = "lightgray", 
+      #number.angles = 30)
+```
+
+```{r}
+#upset_plot <- UpSetR::upset(fromList(cibersort_output_metadata_add_majority_predictions)) #, order.by = "freq", #main.bar.color = "skyblue",
+#upset_plot
+```
+
+```{r}
+cibersort_output_metadata_add_majority
+#cibersort_output_metadata_selected_combined_all <- cbind.data.frame(cibersort_output_metadata_selected_combine_add_majority, ciber)
+cibersort_output_metadata_add_majority$Grade <- as.factor(cibersort_output_metadata_add_majority$Grade)
+cibersort_output_metadata_add_majority$Condition <- as.factor(cibersort_output_metadata_add_majority$Condition)
+cibersort_output_metadata_add_majority$Patient <- as.factor(cibersort_output_metadata_add_majority$Patient)
+data.for.model <- cibersort_output_metadata_add_majority %>% dplyr::select(Grade, S1, S3, S4, Condition, Age) 
+summary(glm(Grade ~ S1+S3+S4+Condition+Age, family = "binomial", data = data.for.model))
+
+
+```
+
+```{r}
+cibersort_output_metadata_add_majority_no_tie <- cibersort_output_metadata_add_majority[which(cibersort_output_metadata_add_majority$ML_majority_vote != "Tie"),]
+cibersort_output_metadata_add_majority_no_tie
+
+percent_ovelap_cibersort_max_majority_vote_no_tie  <- (100*length(which(cibersort_output_metadata_add_majority_no_tie$max_proportion_cibersort == cibersort_output_metadata_add_majority_no_tie$ML_majority_vote) == TRUE))/nrow(cibersort_output_metadata_add_majority_no_tie)
+percent_ovelap_gene_sig_max_majority_vote_no_tie <- (100*length(which(cibersort_output_metadata_add_majority_no_tie$Predicted.subpop.sigscore == cibersort_output_metadata_add_majority_no_tie$ML_majority_vote) == TRUE))/nrow(cibersort_output_metadata_add_majority_no_tie)
+percent_ovelap_gene_sig_cibersort_no_tie <- (100*length(which(cibersort_output_metadata_add_majority_no_tie$Predicted.subpop.sigscore == cibersort_output_metadata_add_majority_no_tie$max_proportion_cibersort) == TRUE))/nrow(cibersort_output_metadata_add_majority_no_tie)
+
+print(paste("overlap between cibersort and majority vote: ", percent_ovelap_cibersort_max_majority_vote_no_tie, "%", sep = ""))
+print(paste("overlap between gene signature and majority vote: ", percent_ovelap_gene_sig_max_majority_vote_no_tie, "%", sep = ""))
+print(paste("overlap between cibersort and gene signature: ", percent_ovelap_gene_sig_cibersort_no_tie, "%", sep = ""))
+```
+
+```{r}
+library(xtable)
+overlap_information <- data.frame(V1 = "90.5%")
+overlap_information$V2 <- "71.4"
+overlap_information$V3 <- "62%"
+overlap_information$V4 <- "12.5%"
+overlap_information_t <- data.frame(t(overlap_information))
+rownames(overlap_information_t) <- c("CIBERSORTx MLSeq majority vote overlap", "Gene signature majority vote overlap", "CIBERSORTx gene signature overlap", "NAs in majority vote")
+colnames(overlap_information_t) <- NULL
+xtable(overlap_information_t)
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/boxplot_caf_tan_subpop_proportions.svg")
+proportion_per_subpop_caf_tan_plot
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/cibersort_plot_online.svg")
+cibersort_plot_online
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/cibersort_plot_online_absolute.svg")
+cibersort_plot_online_abs
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/f1_score_mlseq.svg")
+plot.out
+dev.off()
+```
+
+
+
+
+
+
 

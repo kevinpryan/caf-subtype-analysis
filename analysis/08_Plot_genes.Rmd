@@ -1,0 +1,92 @@
+---
+title: "Plot genes of interest CAF subpopulations"
+author: "Kevin Ryan"
+date: "2023-01-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(DESeq2)
+library(ggplot2)
+library(biomaRt)
+```
+
+## Intro
+
+Goal: plot expression of 5 genes of interest using DESeq2's plotCounts() function
+Do for both batch-corrected and not corrected data.
+Indicate whether they were differentially expressed.
+
+```{r}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+                host="uswest.ensembl.org")
+
+ensembl.version.2.hgnc <- getBM(attributes = c("ensembl_gene_id_version", "ensembl_gene_id", "hgnc_symbol", "entrezgene_id"), mart = mart, useCache = FALSE)
+genes.interest <- c("WT1", "SLC7A2", "GPR37", "ADGRF5", "PCDH10")
+gene.interest.ensg.version <- filter(ensembl.version.2.hgnc, hgnc_symbol %in% genes.interest)
+gene.interest.ensg.version
+```
+
+### Read in data
+
+### batch-corrected data
+
+```{r Read in batch corrected data ENSG and remove inhouse data as subpopulation is unknown}
+dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-07.Rds")
+keep <- which(colData(dds.ensg.remove.outliers.batch.corrected)$Subpopulation != "Unknown")
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- dds.ensg.remove.outliers.batch.corrected[,keep]
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation)
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- filter_out_low_expressed(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+### non batch-corrected data
+
+```{r}
+dds.ensg.remove.outliers.no.inhouse <- readRDS("../intermediate_files/dds_not_corrected_remove_outliers_ensg_2022-10-26.Rds")
+```
+
+### DE analysis results
+
+differential expression analysis using non batch-corrected data and 9 surrogate variables (correlation subpopulation sig, correlation batch not sig.)
+
+```{r}
+dds.ensg.remove.outliers.no.inhouse.full.design <- readRDS("../intermediate_files/dds_model_fit_ensg_nsv9_2022-10-26.Rds")
+```
+
+
+## Make plots
+
+```{r}
+genes.interest <- gene.interest.ensg.version$hgnc_symbol
+genes.interest.ensg <- gene.interest.ensg.version$ensembl_gene_id_version
+
+# genes_interest_common_names <- c("FAP", "CD29", "αSMA", "PDPN", "PDGFRB", "FSP1", "CAV1")
+dds_batch_corrected_outliers_removed_marker_genes <- dds.ensg.remove.outliers.no.inhouse[genes.interest.ensg,]
+plotcounts_dfs <- list()
+for (i in 1:length(genes_interest)){
+  plotcounts_dfs[[i]] <- plotCounts(dds_batch_corrected_outliers_removed_marker_genes, 
+                                    gene=genes_interest[i], 
+                                    returnData = TRUE,
+                                    intgroup = c("Subpopulation", "Tumor_JuxtaTumor")
+                                    )
+}
+
+plots_out_tumor_juxtatumor <- list()
+for (i in 1:length(plotcounts_dfs)){
+  plt <- caf_plot_tumour_juxtatumour(df_for_plotting = plotcounts_dfs[[i]], 
+                                                                   gene = genes_interest_common_names[i])
+  plots_out_tumor_juxtatumor[[i]] = plt
+}
+```
+
+```{r}
+ggar_obj_tumor_juxtatumor <- ggarrange(plotlist = plots_out_tumor_juxtatumor, common.legend = TRUE) # rel_heights values control title margins
+ggar_obj_tumor_juxtatumor_annotated <- annotate_figure(ggar_obj_tumor_juxtatumor, bottom = text_grob("CAF Subpopulation"))
+ggar_obj_tumor_juxtatumor_annotated
+```

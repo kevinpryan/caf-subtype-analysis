@@ -4,14 +4,15 @@
 library(SummarizedExperiment)
 library(tibble)
 library(tximport)
-metadata <- read.table("/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/metadata_caf_subtypes.txt", row.names = 1)
+library(here)
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1)
 idx_6144 <- which(metadata$Study == "EGAD00001006144")
 metadata <- metadata[-c(idx_6144),]
 idx_inhouse <- which(metadata$Study == "InHouse")
 metadata_no_inhouse <- metadata[-c(idx_inhouse),]
 files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
 coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
-                      Subtype = metadata$Subtype, 
+                      Subpopulation = metadata$Subpopulation, 
                       Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
                       stringsAsFactors=FALSE)
 
@@ -29,12 +30,13 @@ gse.s = SummarizedExperiment(assays = list(counts = gi.s[["counts"]], abundance 
                              colData = coldata)
 abundance_tpm_data <- as.data.frame(assays(gse.s)[["abundance"]])
 colnames(abundance_tpm_data) <- coldata$names
+abundance_tpm_data <- abundance_tpm_data[-c(1),]
 abundance_tpm_data_no_inhouse <- abundance_tpm_data[,colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse)]
 abundance_tpm_data_inhouse <- abundance_tpm_data[,!(colnames(abundance_tpm_data) %in% rownames(metadata_no_inhouse))]
 abundance_tpm_data_no_inhouse <- tibble::rownames_to_column(abundance_tpm_data_no_inhouse, "genes")
 abundance_tpm_data_inhouse <- tibble::rownames_to_column(abundance_tpm_data_inhouse, "genes")
-subtypes_labelled <- metadata_no_inhouse$Subtype
-colnames(abundance_tpm_data_no_inhouse)[-1] <- subtypes_labelled
+subpopulations_labelled <- metadata_no_inhouse$Subpopulation
+colnames(abundance_tpm_data_no_inhouse)[-1] <- subpopulations_labelled
 abundance_tpm_data_no_inhouse <- tibble(abundance_tpm_data_no_inhouse, .name_repair = "minimal")
 s1_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S1")
 s3_cols <- which(colnames(abundance_tpm_data_no_inhouse) == "S3")
@@ -56,6 +58,10 @@ abundance_tpm_data_inhouse[1:5,1:5]
      #     sep = "\t", quote = F,
       #   row.names = F)
 
+write.table(abundance_tpm_data_inhouse, 
+       file = here("intermediate_files/cibersort/caf_tpm_mixture_hgnc_remove_summary_row.txt"), 
+     sep = "\t", quote = F,
+   row.names = F)
 # create phenotype classes file
 s1_cols_length <- length(s1_cols)
 s3_cols_length <- length(s3_cols)

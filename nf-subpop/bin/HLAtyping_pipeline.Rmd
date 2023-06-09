@@ -1,0 +1,183 @@
+---
+title: "HLAtyping outputs"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+params:
+  metadata: ""
+  files_to_exclude: ""
+  hlatyping_in: ""
+  method: ""
+---
+
+
+```{r message = F, warning=F}
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(stringr)
+library(readr)
+library(igraph)
+```
+
+#### Read in data
+
+```{r}
+if (params$method == "nextflow") {
+  metadata <- params$metadata
+  print(paste("metadata file: ", metadata))
+  files_to_exclude <- params$files_to_exclude
+  print(paste("files_to_exclude: ", files_to_exclude))
+  hlatyping_input <- params$hlatyping_in
+  data <- read.table(hlatyping_input, na.strings = "", fill = TRUE, sep = "\t")
+  data$V1 <- str_split_fixed(data$V1, pattern = "\\_", n = 3)[,1]
+  data$V2 <- NULL
+  colnames(data) <- c("V1", "A1", "A2", "B1", "B2", "C1", "C2", "Reads", "Objective")
+  data <- tibble(data)
+} else {
+  metadata <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt"
+  indir <- "~/Documents/PhD/hlatyping/"
+  files_to_exclude <- "~/Documents/PhD/CAF_data/samples_not_included_in_analysis_2022-10-14.txt"
+  files <- list.files(path = indir, pattern = "*.tsv", recursive = TRUE)
+  all_files <- paste(indir, files, sep = "")
+  temp <- lapply(all_files, fread, sep="\t")
+  filenames <- str_split_fixed(files, pattern = "\\/", n = 2)[,1]
+  filenames <- str_split_fixed(filenames, pattern = "\\_", n = 2)[,1]
+  data <- rbindlist( temp )
+  data$V1 <- filenames
+  data <- tibble(data)
+}
+```
+
+
+
+```{r read in data nextflow}
+# print("indir:")
+# print(indir)
+# all_files <- params$indir
+# print(all_files)
+# temp <- lapply(all_files, fread, sep="\t")
+# filenames <- str_split_fixed(all_files, pattern = "\\/", n = 2)[,1]
+# filenames <- str_split_fixed(filenames, pattern = "\\_", n = 2)[,1]
+# data <- rbindlist( temp )
+# data$V1 <- filenames
+# data <- tibble(data)
+
+```
+
+```{r read in exclude files}
+colnames(data)[1] <- "Sample"
+samples_not_included <- read.table(files_to_exclude)
+data <- data[!(data$Sample %in% samples_not_included$V1),]
+```
+
+
+```{r read in metadata}
+metadata_in <- read.table(metadata)
+metadata_in$Sample <- rownames(metadata_in)
+rownames(metadata_in) <- NULL
+metadata_in <- tibble(metadata_in)
+names_to_change_idx <- grep("CAF", metadata_in$Sample)
+names_to_change <- metadata_in$Sample[grep("CAF", metadata_in$Sample)]
+new_names <- str_split_fixed(names_to_change, pattern = "\\_", n = 3)[,3]
+metadata_in$Samplenames_old <- metadata_in$Sample
+metadata_in$Sample[names_to_change_idx] <- new_names
+metadata_in <- metadata_in[!(metadata_in$Study == "InHouse"),]
+```
+
+```{r combine data}
+data_combined <- full_join(data, metadata_in, by = "Sample")
+sample_to_remove <- "B86T26"
+sample_to_remove_row <- data_combined[which(data_combined$Sample == sample_to_remove),]
+data_combined <- data_combined[1:nrow(data_combined)-1,]
+data_combined <- data_combined[which(!(data_combined$Sample == sample_to_remove)),]
+```
+
+
+```{r calculate overlaps}
+fmat <- function(n) {
+             diag(n)==1
+ }
+x <- fmat(nrow(data_combined))
+x[1:5,1:5]
+for (i in 1:nrow(data_combined)) {
+  # Loop through each row after the current row
+  for (j in (i+1):nrow(data_combined)) {
+    #print(j)
+    # Check if 5 out of the 6 alleles match
+    #summation = sum(data_combined[i,2:7][!is.na(data_combined[i, 2:7])] %in% data_combined[j,2:7][!is.na(data_combined[j, 2:7])])
+    overlap = intersect(data_combined[i,2:7][!is.na(data_combined[i, 2:7])], data_combined[j,2:7][!is.na(data_combined[j, 2:7])])
+    overlap_proportion_i =length(which(data_combined[i,2:7][!is.na(data_combined[i, 2:7])] %in% overlap) == TRUE)/6
+    overlap_proportion_j =length(which(data_combined[j,2:7][!is.na(data_combined[j, 2:7])] %in% overlap) == TRUE)/6
+    #print("first")
+    #print(data_combined[i, 2:7][!is.na(data_combined[i, 2:7])])
+    #print("second")
+    #print(data_combined[j, 2:7][!is.na(data_combined[j, 2:7])])
+    #print(summation)
+    #if (sum(!is.na(data_combined[i, 2:7]) == !(is.na(data_combined[j, 2:7])) >= 5) {
+    # want proportion of HLA calls in intersect to be at least 5, 5/6 = 0.8333
+    #if (summation >= 5){
+    if (overlap_proportion_i > 0.8 && overlap_proportion_j > 0.8){
+      # Mark both rows as duplicated
+      #duplicated_rows[i] <- TRUE
+      #duplicated_rows[j] <- TRUE
+      x[i,j] <- TRUE
+    }
+      #print(sum(data_combined[i, 2:7] == data_combined[j, 2:7]) >= 5)
+      # Mark both rows as duplicated
+      #print(duplicated_rows)
+      #duplicated_rows[i] <- TRUE
+      #duplicated_rows[j] <- TRUE
+    #}
+  }
+}
+
+```
+
+```{r combine per patient}
+g <- graph_from_adjacency_matrix(x, mode="undirected")
+# Cluster the nodes into patient groups using the fastgreedy algorithm
+fc <- fastgreedy.community(g)
+# Get the membership vector for each sample
+membership <- membership(fc)
+data_combined$Patient <- membership
+sample_to_remove_row_out <- cbind(Patient = (max(data_combined$Patient)+1), sample_to_remove_row)
+sample_to_remove_row_out
+output <- rbind(data_combined, sample_to_remove_row_out)
+output$Patient <- (output$Patient + 12)
+output <- output %>% relocate(Patient) %>% arrange(Patient)
+data_combined <- data_combined %>% relocate(Patient) %>% arrange(Patient)
+```
+
+```{r}
+data_combined
+```
+
+```{r}
+data_combined_hla_only <- data_combined[,c(1:7)]
+data_combined_hla_only
+```
+
+
+```{r}
+write.table(output, file = "metadata_with_patient.txt", quote = F, sep = "\t",row.names = F)
+```
+
+```{r}
+## read in samples run with smash
+smash <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/smash/smash_samples.txt")
+```
+
+```{r}
+outersect <- function(x, y) {
+  sort(c(setdiff(x, y),
+         setdiff(y, x)))
+}
+```
+
+```{r}
+smash$basename <- str_split_fixed(smash$V1, pattern = "\\.markdup\\.sorted\\.bam", n = 2)[,1]
+outersect(smash$basename, output$Sample)
+```
+

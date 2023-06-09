@@ -3,9 +3,9 @@
 library(optparse)
 library(stringr)
 option_list = list(
-  make_option(c("-f", "--out_full"), type="character", default=NULL, 
+  make_option(c("-f", "--out_full"), type="character", default="metadata_full.txt", 
               help="specify output file for all samples", metavar="character"),
-  make_option(c("-r", "--out_reduced"), type="character", default=NULL,
+  make_option(c("-r", "--out_reduced"), type="character", default="metadata_no_inhouse.txt",
               help="specify outfile name for reduced dataset without inhouse samples", metavar="character"),
   make_option(c("-b", "--basedir"), type="character", default="/home/kevin/Documents/PhD/CAF_data/",
               help="basedir with all datasets i.e. /home/kevin/Documents/PhD/CAF_data/", metavar="character")

@@ -1,0 +1,201 @@
+---
+title: "Deconvolution"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+params:
+  metadata: ""
+  out: ""
+  batch.corrected: ""
+---
+
+## bibliography: citations.bib  
+
+```{r include=FALSE}
+library(DESeq2)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(here)
+library(biomaRt)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+```
+
+Converting the Deconvolution script into a version that can go into a Nextflow pipeline. Need to run from the command line, without hardcoding paths.
+This script takes in the batch-corrected data, converts it to TPM. Get effective gene lengths by taking in the quant.genes.sf file for each sample.
+
+Inputs:dds.remove.outliers.batch.corrected - ch_dds_remove_outliers_batch_corrected
+metadata_full.txt - ch_metadata - for finding the quant_genes.sf
+
+Rscript -e rmarkdown::render( Deconvolution_pipeline.Rmd --metadata --tx2gene --out --batch.corrected)
+
+## Convert command-line arguments to variables
+
+```{r}
+metadata_file <- params$metadata
+print(paste("metadata file: ", metadata))
+#tx2gene_file <- params$tx2gene
+#print(paste("tx2gene file: ", tx2gene_file))
+out <- params$out
+print(paste("out file: ", out))
+batch.corrected <- params$batch.corrected
+```
+
+```{r}
+metadata_file <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt"
+tx2gene_file <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+out <- "out.txt"
+batch.corrected <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/qc/dds_remove_outliers_batch_corrected.Rds"
+```
+
+```{r}
+outfile <- data.frame(x = c(1,2,3), y = c(3,4,5))
+write.table(outfile, file = out, quote = F)
+```
+
+# CIBERSORT
+
+CIBERSORT requires TPM as input, therefore we need to convert our batch corrected counts to TPM. To get the gene lengths for this, we will use the effective gene lengths from the Salmon output. Therefore, we must use the ENGS gene id version.
+
+## Generate inputs to CIBERSORT
+
+The function `tpm.convert` is used to convert the counts to TPM.
+
+```{r}
+tpm.convert <- function(counts.mat, gene.length){
+x <- counts.mat / gene.length
+#Then with this matrix x, you do the following:
+tpm.mat <- t( t(x) * 1e6 / colSums(x) )
+}
+
+read_in_quant_genes <- function(file.name){
+  x <- read.table(file = file.name, header = T)[,c(1,3)]
+  #colnames(x)[2] <- as.character(sample.name)
+  return(x)
+}
+```
+
+```{r}
+dds.remove.outliers.batch.corrected <- readRDS(batch.corrected)
+```
+
+```{r}
+metadata <- read.table(metadata_file, row.names = 1, sep = "\t")
+files.gene <- file.path(metadata$directory, rownames(metadata), "quant.genes.sf")
+files.gene.samples <- str_split_fixed(files.gene, pattern = "/", n = 11)[,10]
+files.gene.outliers.removed <- files.gene[files.gene.samples %in% colnames(dds.remove.outliers.batch.corrected)]
+sample.names.outliers.removed <- files.gene.samples[files.gene.samples %in% colnames(dds.remove.outliers.batch.corrected)]
+```
+
+```{r}
+genes.effective.lengths <- lapply(files.gene.outliers.removed, read_in_quant_genes)
+length(genes.effective.lengths)
+
+genes.effective.lengths.list <- list()
+for (i in 1:length(genes.effective.lengths)){
+  df <- genes.effective.lengths[[i]]
+  colnames(df)[2] <- sample.names.outliers.removed[i]
+  genes.effective.lengths.list[[i]] <- df
+}
+
+```
+
+```{r}
+genes.effective.lengths.df <- genes.effective.lengths.list %>% purrr::reduce(inner_join, by = "Name")
+#mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", #host="https://www.ensembl.org")
+               # host="useast.ensembl.org")
+## can get a new tx2gene with hgnc symbol if i need it using the gtf file!
+#tx2gene.ensg <- getBM(attributes = c("hgnc_symbol", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+#colnames(tx2gene.ensg)[2] <- "Name"
+#genes.effective.lengths.df.hgnc <- left_join(genes.effective.lengths.df, tx2gene.ensg,by = "Name")
+```
+
+```{r}
+df.dds.remove.outliers.batch.corrected <- assay(dds.remove.outliers.batch.corrected)[2:nrow(assay(dds.remove.outliers.batch.corrected)),]
+dim(df.dds.remove.outliers.batch.corrected)
+```
+
+```{r}
+rownames(genes.effective.lengths.df) <- NULL
+genes.effective.lengths.df.filtered <- genes.effective.lengths.df[which(genes.effective.lengths.df$Name %in% rownames(df.dds.remove.outliers.batch.corrected)),]
+dim(genes.effective.lengths.df.filtered)
+df.dds.remove.outliers.batch.corrected.matched <- df.dds.remove.outliers.batch.corrected[genes.effective.lengths.df.filtered$Name,]
+stopifnot(all.equal(rownames(df.dds.remove.outliers.batch.corrected.matched), genes.effective.lengths.df.filtered$Name))
+```
+
+```{r}
+rownames(genes.effective.lengths.df.filtered) <- genes.effective.lengths.df.filtered$Name
+genes.effective.lengths.df.filtered$Name <- NULL
+df.dds.remove.outliers.batch.corrected.matched <- data.frame(df.dds.remove.outliers.batch.corrected.matched)
+genes.effective.lengths.df.filtered[1:5,1:5]
+df.dds.remove.outliers.batch.corrected.matched[1:5,1:5]
+```
+
+```{r}
+tpm.out <- tpm.convert(counts.mat =df.dds.remove.outliers.batch.corrected.matched, gene.length = genes.effective.lengths.df.filtered )
+tpm.out[1:5,1:5]
+```
+
+```{r TPM data for mixture matrix}
+tpm.out.mixture <- data.frame(tpm.out[,which(colData(dds.remove.outliers.batch.corrected)$Study == "InHouse")])
+tpm.out.mixture.genes <- tibble::rownames_to_column(tpm.out.mixture, "genes")
+tpm.out.mixture.genes[1:5,1:5]
+tpm.out.mixture.genes.outfile <- "caf_tpm_mixture_batch_corrected.txt"
+write.table(x = tpm.out.mixture.genes, file = tpm.out.mixture.genes.outfile, sep = "\t", quote = F, row.names = F)
+```
+
+```{r TPM data for signature matrix}
+# signature is our non-inhouse
+tpm.out.signature <- tpm.out[,which(dds.remove.outliers.batch.corrected$Study != "InHouse")]
+colnames(tpm.out.signature) <- dds.remove.outliers.batch.corrected$Subpopulation[which(dds.remove.outliers.batch.corrected$Study != "InHouse")]
+tpm.out.signature[1:5,1:5]
+```
+
+```{r}
+s1_cols <- which(colnames(tpm.out.signature) == "S1")
+s3_cols <- which(colnames(tpm.out.signature) == "S3")
+s4_cols <- which(colnames(tpm.out.signature) == "S4")
+
+s1_cols_length <- length(s1_cols)
+s3_cols_length <- length(s3_cols)
+s4_cols_length <- length(s4_cols)
+```
+
+```{r Put signature data in the right order ie all the S1s together etc}
+tpm.data.no.inhouse.order <- cbind.data.frame(rownames(tpm.out.signature),
+                                              tpm.out.signature[,s1_cols],
+                                              tpm.out.signature[,s3_cols],
+                                              tpm.out.signature[,s4_cols]
+                                              )
+colnames(tpm.data.no.inhouse.order) <- NULL
+rownames(tpm.data.no.inhouse.order) <- NULL
+cols_no_inhouse <- c("genes", rep("S1", s1_cols_length), rep("S3", s3_cols_length), rep("S4", s4_cols_length))
+tpm.data.no.inhouse.order <- rbind.data.frame(cols_no_inhouse, tpm.data.no.inhouse.order)
+tpm.data.no.inhouse.order[1:5,1:5]
+tpm.data.no.inhouse.order.outfile <- paste("caf_tpm_for_signature_batch_corrected.txt", sep = "")
+write.table(tpm.data.no.inhouse.order, file = here(tpm.data.no.inhouse.order.outfile), sep = "\t", quote = F, row.names = F, col.names = F)
+```
+
+```{r create phenoclasses file}
+S1 <- c(rep(1,s1_cols_length), rep(2, (s3_cols_length+s4_cols_length)))
+S3 <- c(rep(2,s1_cols_length), rep(1, s3_cols_length), rep(2, s4_cols_length))
+S4 <- c(rep(2, (s1_cols_length+s3_cols_length)), rep(1, s4_cols_length))
+
+
+if (length(S1) != length(colnames(tpm.out.signature))){
+  stop("length s1 row incorrect")
+} else if (length(S3) != length(colnames(tpm.out.signature))) {
+  stop("length s3 row incorrect")
+} else if (length(S4) != length(colnames(tpm.out.signature))) {
+  stop("length s4 row incorrect")
+}
+
+out <- rbind.data.frame(S1, S3, S4)
+colnames(out) <- NULL
+row.names(out) <- c("S1", "S3", "S4")
+outfile.name <-  "phenoclasses_caf.txt"
+write.table(out, file = outfile.name, sep = "\t", quote = F, col.names = F)
+```

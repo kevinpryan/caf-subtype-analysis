@@ -1,0 +1,269 @@
+---
+title: "Apply gene signatures from DESeq2 analysis"
+output: github_document
+bibliography: citations.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(GSVA)
+library(DESeq2)
+library(tximeta)
+library(here)
+library(biomaRt)
+library(singscore)
+library(SummarizedExperiment)
+library(edgeR)
+library(dplyr)
+library(stringr)
+library(GSEABase)
+```
+
+```{r include=FALSE}
+filter_out_low_expressed <- function(dds){
+  print(paste("no of genes before filtering...", nrow(dds)))
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+
+tpm.convert <- function(counts.mat, gene.length){
+x <- counts.mat / gene.length
+#Then with this matrix x, you do the following:
+tpm.mat <- t( t(x) * 1e6 / colSums(x) )
+}
+
+read_in_quant_genes <- function(file.name){
+  x <- read.table(file = file.name, header = T)[,c(1,3)]
+  #colnames(x)[2] <- as.character(sample.name)
+  return(x)
+}
+
+getBM.call.distinct.ensg.version <- function(vec){
+  library(biomaRt)
+  library(dplyr)
+  mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+  info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description",
+                               "entrezgene_id"
+                               ),
+                  filters = "ensembl_gene_id_version",
+                  values = vec,
+                  mart = mart,
+                  useCache=FALSE)
+  info.out <- distinct(info, ensembl_gene_id_version, .keep_all = TRUE)
+}
+
+```
+
+## Sigscore
+
+### Data preparation for Sigscore
+
+The methods described in the Sigscore papers [@Foroutan2018],[@Bhuva2019] were used to apply the sigscore method. Steps to prepare data are:
+
+1. Read in count data
+2. Filter out genes with low counts
+3. Convert to TPM
+
+Not sure whether to use batch-corrected data or original dataset
+
+Read in data in TPM format
+
+```{r}
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1, sep = "\t")
+metadata.inhouse <- metadata[which(metadata$Study == "InHouse"),]
+data.tpm.batch.corrected <- read.table(here("intermediate_files/singscore/caf_tpm_all_samples_outliers_removed_engs_version_batch_corrected_2022-11-04.txt"))
+colnames(data.tpm.batch.corrected) <- gsub("X", "", colnames(data.tpm.batch.corrected))
+```
+
+```{r}
+data.tpm.inhouse <- data.tpm.batch.corrected[,rownames(metadata)[which(metadata$Study == "InHouse")]]
+```
+
+### Sigscore analysis
+
+```{r Read in gene signatures}
+s1.signature <- readRDS("../intermediate_files/singscore/genesig_s1_bidirectional_ 2022-11-04 .Rds")
+s3.signature <- readRDS("../intermediate_files/singscore/genesig_s3_bidirectional_ 2022-11-04 .Rds")
+s4.signature <- readRDS("../intermediate_files/singscore/genesig_s4_bidirectional_ 2022-11-04 .Rds")
+```
+
+```{r}
+rankData <- rankGenes(data.tpm.inhouse)
+scoredf_s1 <- simpleScore(rankData = rankData, upSet = geneIds(s1.signature)[geneColor(s1.signature) == "Up"], downSet = geneIds(s1.signature)[geneColor(s1.signature) == "Down"]) %>% mutate(Condition = metadata.inhouse$Tumor_JuxtaTumor)
+scoredf_s3 <- simpleScore(rankData = rankData, upSet = geneIds(s3.signature)[geneColor(s3.signature) == "Up"], downSet = geneIds(s3.signature)[geneColor(s3.signature) == "Down"])%>% mutate(Condition = metadata.inhouse$Tumor_JuxtaTumor)
+scoredf_s4 <- simpleScore(rankData = rankData, upSet = geneIds(s4.signature)[geneColor(s4.signature) == "Up"], downSet = geneIds(s4.signature)[geneColor(s4.signature) == "Down"])%>% mutate(Condition = metadata.inhouse$Tumor_JuxtaTumor)
+
+plotDispersion(scoredf_s1, annot = "Condition")
+plotDispersion(scoredf_s3, annot = "Condition")
+plotDispersion(scoredf_s4, annot = "Condition")
+
+plotRankDensity(rankData[,2,drop = FALSE], upSet = geneIds(s1.signature)[geneColor(s1.signature) == "Up"], 
+                downSet = geneIds(s1.signature)[geneColor(s1.signature) == "Down"], isInteractive = FALSE)
+plotRankDensity(rankData[,2,drop = FALSE], upSet = geneIds(s3.signature)[geneColor(s3.signature) == "Up"], 
+                downSet = geneIds(s3.signature)[geneColor(s3.signature) == "Down"], isInteractive = FALSE)
+plotRankDensity(rankData[,2,drop = FALSE], upSet = geneIds(s4.signature)[geneColor(s4.signature) == "Up"], 
+                downSet = geneIds(s4.signature)[geneColor(s4.signature) == "Down"], isInteractive = FALSE)
+```
+
+```{r}
+p_s1_s3 = plotScoreLandscape(
+  scoredf1 = scoredf_s1,
+  scoredf2 = scoredf_s3,
+  scorenames = c('S1 myofibroblastic', 'S3 normal-like'),
+)
+
+projectScoreLandscape(p_s1_s3, scoredf1 = scoredf_s1, scoredf2 = scoredf_s3,  annot = scoredf_s1$Condition)
+
+p_s1_s4 = plotScoreLandscape(
+  scoredf1 = scoredf_s1,
+  scoredf2 = scoredf_s4,
+  scorenames = c('S1 myofibroblastic', 'S4 inflammatory'),
+)
+
+projectScoreLandscape(p_s1_s4, scoredf1 = scoredf_s1, scoredf2 = scoredf_s4,  annot = scoredf_s1$Condition)
+
+p_s3_s4 = plotScoreLandscape(
+  scoredf1 = scoredf_s3,
+  scoredf2 = scoredf_s4,
+  scorenames = c('S3 normal-like', 'S4 inflammatory'),
+)
+
+projectScoreLandscape(p_s3_s4, scoredf1 = scoredf_s3, scoredf2 = scoredf_s4,  annot = scoredf_s1$Condition)
+```
+
+```{r}
+# df <- singscores.combined
+# columns.dataframe.vector <- c("S1.score", "S3.score","S4.score")
+# # possibilities for normalising - softmax, 
+# normalise.score <- function(df, columns.dataframe.vector, reference){
+#   nrow.df <- nrow(df)
+#   number.cols <- length(columns.dataframe.vector)
+#   col.nums <- which(colnames(df) %in% columns.dataframe.vector)
+#   score <- c()
+#   for (i in 1:nrow.df){
+#     normaliser <- 1/sum(df[i,col.nums])
+#     #score[i] <- df[i,reference]/sum(df[i,col.nums])
+#     score[i] <- df[i,reference]*normaliser
+#     print(score[i])
+#   }
+#   #score.normalised <- score-min(score)/max(score)-min(score)
+#   output.name <- paste(reference, ".normalised", sep = "")
+#   df$`output.name` <- score
+#   names(df)[names(df) == "output.name"] <- output.name
+#   return(df)
+# }
+normalise.score(df = singscores.combined, columns.dataframe.vector = columns.dataframe.vector, reference = "S1.score")
+scoredf_s3
+singscores.combined <- data.frame(row.names = rownames(metadata.inhouse), S1.score = scoredf_s1$TotalScore, S3.score = scoredf_s3$TotalScore, S4.score = scoredf_s4$TotalScore, Condition = ifelse(metadata.inhouse$Tumor_JuxtaTumor == "tumor", "CAF", "TAN"))
+singscores.combined %>% mutate(Predicted = which.max(S1.score, S3.score, S4.score))
+singscores.combined.normalised.df <- singscores.combined %>% normalise.score(columns.dataframe.vector = columns.dataframe.vector, reference = "S1.score") %>% normalise.score(columns.dataframe.vector = columns.dataframe.vector, reference = "S3.score") %>%  normalise.score(columns.dataframe.vector = columns.dataframe.vector, reference = "S4.score")
+singscores.combined.normalised.df
+```
+
+```{r add max subpopulation}
+library(stringr)
+max.cols <- max.col(singscores.combined[,1:3])
+max.cols.names <- colnames(singscores.combined)[max.cols]
+singscores.combined$Predicted.subpop <- str_split_fixed(max.cols.names, pattern = "\\.", n = 2)[,1]
+singscores.combined
+```
+
+```{r}
+write.table(singscores.combined, file = "../outfiles/singscore_results.txt", quote = F)
+```
+
+
+### Gene set variation analysis (GSVA) for gene signature identification
+
+```{r Prepare to read in data, include = FALSE}
+# metadata file created with create_metadata.R
+dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-07.Rds")
+files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+files.samples <- str_split_fixed(files, pattern = "/", n = 11)[,10]
+files.outliers.removed <- files[files.samples %in% colnames(dds.ensg.remove.outliers.batch.corrected)]
+metadata.outliers.removed <- metadata[files.samples %in% colnames(dds.ensg.remove.outliers.batch.corrected),]
+coldata <- data.frame(files.outliers.removed, names=rownames(metadata.outliers.removed), Study = metadata.outliers.removed$Study, 
+                      Subpopulation = metadata.outliers.removed$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata.outliers.removed$Tumor_JuxtaTumor,
+                      stringsAsFactors=FALSE)
+colnames(coldata)[1] <- "files"
+
+# tx2gene but using the hgnc symbol instead of ensembl gene id version
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+                #host="uswest.ensembl.org")
+tx2gene.ensg.version <- getBM(attributes = c("ensembl_transcript_id_version", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
+```
+
+```{r Read in data and filter out lowly expressed genes}
+# salmon was used in alignment mode so there is no salmon index, therefore there is no checksum to import the metadata 
+# txOut = FALSE means to summarise to gene level (i.e. don't give out transcripts, give out gene level)
+se.ensg <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene.ensg.version)
+dds.ensg <- DESeqDataSet(se.ensg, design = ~1)
+dds.ensg <- filter_out_low_expressed(dds.ensg)
+dds.ensg.inhouse <- dds.ensg[,dds.ensg$Study == "InHouse"]
+dds.ensg.inhouse.rlog <- rlog(dds.ensg.inhouse)
+```
+
+The gene signature was identified using differential expression analysis with DESeq2. Genes that were deemed to be significantly upregulated in one subpopulation (logFC > 2) compared to the others (alpha < 0.05, padj < 0.05) were extracted. The null hypothesis was that the real lfc is not greater than 2
+
+```{r}
+gene.signature <- readRDS(file = here("intermediate_files/sv9_deanalysis_genesig_alpha05_lfc2_padj05_2022-10-28.Rds"))
+```
+
+```{r}
+inhouse_metadata <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples_extra_info.csv")
+caf_es <- gsva(expr = dds.ensg.inhouse,
+               gset.idx.list = gene.signature,
+               method = "gsva",
+               kcdf = "Poisson")
+               #mx.diff=FALSE)
+caf_es$Patient <- inhouse_metadata$Patient
+caf_es$Subtype <- inhouse_metadata$Subtype
+caf_es$Grade <- inhouse_metadata$Grade
+caf_es$Histology <- inhouse_metadata$Histology
+```
+```{r}
+#caf_es_ssgsea <- gsva(expr = dds.ensg.inhouse.rlog,
+ #              gset.idx.list = gene.signature,
+  #             method = "ssgsea")
+```
+
+```{r}
+#plot(assay(caf_es)[1,], assay(caf_es_ssgsea)[1,])
+#cor(assay(caf_es)[1,], assay(caf_es_ssgsea)[1,])
+#plot(assay(caf_es)[2,], assay(caf_es_ssgsea)[2,])
+#cor(assay(caf_es)[2,], assay(caf_es_ssgsea)[2,])
+#plot(assay(caf_es)[3,], assay(caf_es_ssgsea)[3,])
+#cor(assay(caf_es)[3,], assay(caf_es_ssgsea)[3,])
+```
+
+
+```{r}
+test <- rankGenes(dds.ensg.inhouse)
+test_scored_S1 <- simpleScore(test, upSet = gene.signature$S1)
+test_scored_S3 <- simpleScore(test, upSet = gene.signature$S3)
+test_scored_S4 <- simpleScore(test, upSet = gene.signature$S4)
+test_scored_S1
+```
+
+```{r}
+plotScoreLandscape(scoredf1 = test_scored_S1, scoredf2 = test_scored_S3, scorenames = c("S1", "S3"), sampl)
+```
+

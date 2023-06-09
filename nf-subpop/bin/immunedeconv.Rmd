@@ -1,0 +1,704 @@
+---
+title: "Immunedeconv"
+author: "Kevin Ryan"
+date: "2023-05-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(biomaRt)
+library(immunedeconv)
+library(corrplot)
+library(forcats)
+```
+
+```{r}
+annotate_genes <- function(df){
+
+    df$hgnc_symbol <- df$gene
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl") #, host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description"),
+                  filters = c("hgnc_symbol"),
+                  values = df$gene,
+                  mart = mart,
+                  useCache=FALSE)
+
+    tmp <- merge(df, info, by="hgnc_symbol")
+    tmp$strand <- gsub("-1", "-", tmp$strand)
+    tmp$strand <- gsub("1", "+", tmp$strand)
+    tmp <- tmp[!grepl("CHR", tmp$chromosome_name),]
+
+    return(tmp)
+
+}
+
+convert_ensg_version_to_hgnc_df_rownames <- function(df, ensdb = EnsDb.Hsapiens.v86){
+  library(AnnotationDbi)
+  library(ensembldb)
+  library(EnsDb.Hsapiens.v86)
+  genes_base <- str_split_fixed(string = rownames(df), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+# keep ensg version of newnames is na or is duplicated
+newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+    rownames(df), newnames_original)
+rownames(df) <- newnames
+return(df)
+}
+```
+
+```{r}
+salmon_tpm_path <- "/home/rstudio/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon/salmon.merged.gene_tpm.tsv"
+salmon_tpm_in <- read.table(salmon_tpm_path, header = T)
+colnames(salmon_tpm_in) <- gsub("X", "", colnames(salmon_tpm_in))
+tx2gene_path = "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+tx2gene <- read.table(tx2gene_path, header = T)
+```
+
+```{r}
+salmon_tpm_hgnc <- convert_ensg_version_to_hgnc_df_rownames(salmon_tpm_in)
+salmon_tpm_hgnc_not_duplicated <- salmon_tpm_hgnc[!duplicated(salmon_tpm_hgnc$gene_name),]
+salmon_tpm_hgnc_not_duplicated_hgnc_col <-  subset(salmon_tpm_hgnc_not_duplicated, select = -c(gene_id) )
+colnames(salmon_tpm_hgnc_not_duplicated_hgnc_col) <- gsub("X", "Sample_", colnames(salmon_tpm_hgnc_not_duplicated_hgnc_col))
+#write.table(salmon_tpm_hgnc_not_duplicated_hgnc_col, file = "/home/rstudio/Downloads/salmon_tpm_hgnc_col.txt", sep = "\t", quote = F, row.names = F)
+rownames(salmon_tpm_hgnc_not_duplicated) <- salmon_tpm_hgnc_not_duplicated$gene_name 
+salmon_tpm_hgnc_not_duplicated <-  subset(salmon_tpm_hgnc_not_duplicated, select = -c(gene_name, gene_id) )
+
+```
+
+```{r}
+metadata <- read.csv(file = here("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/metadata/reformat_samples_extra_info.csv"))
+
+colnames(metadata)[1] <- "sample"
+metadata$sample <- as.character(metadata$sample)
+metadata$Condition <- ifelse(metadata$Condition == "Tumour", "CAF", "TAN")
+```
+
+```{r}
+metadata
+```
+
+
+```{r}
+
+# includes cancer-associated fibroblast
+deconvolution_mcp <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, "mcp_counter")
+
+```
+
+```{r}
+deconvolution_mcp_filtered_long <- deconvolution_mcp %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "Endothelial cell")) %>% pivot_longer(!cell_type, names_to = "sample", values_to = "mcp_score")
+deconvolution_mcp_filtered_long_metadata <- full_join(deconvolution_mcp_filtered_long, metadata)
+```
+
+```{r}
+ord <- as.character(seq(1,12,1))
+# Plotting
+deconvolution_mcp_filtered_long_metadata_ordered <- deconvolution_mcp_filtered_long_metadata[order(deconvolution_mcp_filtered_long_metadata$Patient),]
+mcp_plot <- ggplot(deconvolution_mcp_filtered_long_metadata_ordered, aes(x = as.character(Patient), y = mcp_score, color = Condition)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+    scale_x_discrete(limits = ord) +
+    theme(#panel.grid.major = element_blank(), 
+         #panel.grid.minor = element_blank(),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) + 
+  facet_wrap(~ cell_type, nrow = 2, scales = "free_y") +
+  xlab("Patient") +
+  ylab("MCP counter Score") 
+```
+
+```{r}
+mcp_plot
+```
+
+```{r}
+# no fibroblast cell type
+quantiseq <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, method= "quantiseq")
+```
+
+```{r}
+set_cibersort_binary("/home/rstudio/sw/CIBERSORT/CIBERSORT.R")
+#set_cibersort_binary("/home/rstudio/sw/CIBERSORT/CIBERSORT_1.4.R")
+set_cibersort_mat("/home/rstudio/sw/CIBERSORT/LM22.txt")
+#cibersort_out <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, "cibersort")   # or 'cibersort_abs'
+```
+
+```{r}
+# includes cancer-associated fibroblast
+deconvolution_epic <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, "epic")
+```
+
+
+```{r}
+#cibersort_signature_matrix <- read.table("/home/rstudio/Documents/PhD/")
+```
+
+```{r}
+deconvolution_timer <- deconvolute(salmon_tpm_hgnc_not_duplicated, "timer",
+            indications=rep("BRCA", 24))
+```
+
+```{r}
+# timer default is for immune cells - no cafs
+deconvolution_timer
+```
+
+```{r}
+deconvolution_xcell <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, "xcell")
+
+```
+
+```{r}
+colnames(deconvolution_xcell) <- gsub("X", "", colnames(deconvolution_xcell))
+```
+
+```{r}
+# cancer-associated fibroblast, hematopoeitic stem cell, microenvironment score, stroma score
+deconvolution_xcell_long <- deconvolution_xcell %>% pivot_longer(!cell_type, names_to = "sample", values_to = "xcell_score")
+
+# ggplot(data = deconvolution_xcell, aes(x = cell_type, y = xcell_score)) +
+#   geom_bar(stat = "identity", alpha = 0.7) +
+#   facet_grid(. ~sample)  +
+#   ylim(0,800) +
+#   geom_text(aes(label = Freq), fontface = "bold", vjust = 1.5, colour = "white", size = 4) +
+#   labs(x = "\n Coin Flip Outcome", y = "Frequency\n", title = "\n Coin Flip Results \n") +
+#   theme(plot.title = element_text(hjust = 0.5), 
+#         axis.title.x = element_text(face="bold", colour="darkgreen", size = 12),
+#         axis.title.y = element_text(face="bold", colour="darkgreen", size = 12),
+#         legend.title = element_text(face="bold", size = 10),
+#         strip.background = element_rect(fill="lightblue", colour="black", size=1),
+#         strip.text = element_text(face="bold", size=rel(1.2)))
+# Create the ggplot object
+ggplot(deconvolution_xcell_long, aes(x = sample, y = xcell_score)) +
+  # Add the facet wrap
+  facet_wrap(~ cell_type, ncol = 5) +
+  # Add the points
+  geom_point() +
+  # Add the x-axis label
+  xlab("Sample") +
+  # Add the y-axis label
+  ylab("Y Axis Value")
+
+```
+
+```{r}
+deconvolution_xcell_filtered_long <- deconvolution_xcell %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "Hematopoietic stem cell", "stroma score", "microenvironment score")) %>% pivot_longer(!cell_type, names_to = "sample", values_to = "xcell_score")
+deconvolution_xcell_filtered_long_metadata <- full_join(deconvolution_xcell_filtered_long, metadata)
+
+#deconvolution_xcell %>% pivot_longer(!cell_type, names_to = "sample", values_to = "xcell_score")
+```
+
+```{r}
+ggplot(deconvolution_xcell_filtered_long, aes(x = sample, y = xcell_score)) +
+  # Add the facet wrap
+  facet_wrap(~ cell_type, ncol = 2) +
+  # Add the points
+  geom_point() +
+  # Add the x-axis label
+  xlab("Sample") +
+  # Add the y-axis label
+  ylab("XCell Score") +
+  theme(axis.text = element_text(size = 8, angle = 90))
+
+```
+
+```{r}
+xcell_plot <- deconvolution_xcell_filtered_long_metadata %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Patient, y = xcell_score)) +
+  #geom_col() +
+  facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    facet_wrap(~ cell_type, ncol = 2) +
+    #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          #axis.text.y = element_text(size = 12, face = "bold"), 
+          #axis.text.x = element_text(size = 8),
+          #strip.text.y = element_text(size = rel(100))
+          #) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(3, "Dark2"), "gray")
+                    ) +
+  xlab(label = "Patient") + 
+  ylab("XCell score") +
+  theme(#panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) + 
+     # scale_y_continuous(expand = c(0,0)) +
+  #geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8, angle = 90))
+```
+
+```{r}
+# Example data frame
+df <- data.frame(
+  Patient = rep(c("Patient A", "Patient B", "Patient C", "Patient D"), 4),
+  CellType = rep(c("Cell Type 1", "Cell Type 2", "Cell Type 3", "Cell Type 4"), each = 4),
+  Status = rep(c("Tumour", "Normal"), times = 8),
+  Score = rnorm(16)
+)
+
+# Plotting
+ggplot(df, aes(x = Patient, y = Score)) +
+  geom_point() +
+  facet_wrap(~ CellType, scales = "free_y") +
+  facet_grid(~ Status, scales = "free_x") +
+  xlab("Patient") +
+  ylab("Score") +
+  ggtitle("Cell Type Scores")
+```
+
+```{r}
+xcell_plot_test <- deconvolution_xcell_filtered_long_metadata %>% 
+  dplyr::filter(cell_type == "Cancer associated fibroblast") %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Condition, y = xcell_score)) +
+  geom_point() +
+ facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          axis.text.y = element_text(size = 12, face = "bold"), 
+          axis.text.x = element_text(size = 8),
+          strip.text.y = element_text(size = rel(100))
+          ) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+  #   scale_fill_manual(name=NULL,
+  #                   values = c(brewer.pal(3, "Dark2"), "gray")
+  #                   ) +
+  #xlab(label = "Patient") + 
+  theme(#panel.grid.major = element_blank(), 
+         #panel.grid.minor = element_blank(),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) + 
+      # scale_y_continuous(expand = c(0,0.08)) +
+  #geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8))
+```
+
+```{r}
+xcell_plot_test
+```
+
+```{r}
+xcell_plot_test2 <- deconvolution_xcell_filtered_long_metadata %>% 
+  #dplyr::filter(cell_type == "Cancer associated fibroblast") %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  ggplot(aes(x = Condition, y = xcell_score)) +
+  geom_point() +
+ facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          axis.text.y = element_text(size = 12, face = "bold"), 
+          axis.text.x = element_text(size = 8),
+          strip.text.y = element_text(size = rel(100))
+          ) +
+    facet_grid(~ cell_type, scales = "free_y") +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+  #   scale_fill_manual(name=NULL,
+  #                   values = c(brewer.pal(3, "Dark2"), "gray")
+  #                   ) +
+  #xlab(label = "Patient") + 
+  theme(#panel.grid.major = element_blank(), 
+         #panel.grid.minor = element_blank(),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) + 
+      # scale_y_continuous(expand = c(0,0.08)) +
+  #geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8))
+```
+
+```{r}
+xcell_plot_test2
+```
+
+```{r}
+# Example data frame
+ord <- as.character(seq(1,12,1))
+
+# Plotting
+deconvolution_xcell_filtered_long_metadata_ordered <- deconvolution_xcell_filtered_long_metadata[order(deconvolution_xcell_filtered_long_metadata$Patient),]
+xcell_plot <- ggplot(deconvolution_xcell_filtered_long_metadata_ordered, aes(x = as.character(Patient), y = xcell_score, color = Condition)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+    scale_x_discrete(limits = ord) +
+    theme(#panel.grid.major = element_blank(), 
+         #panel.grid.minor = element_blank(),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) + 
+  facet_wrap(~ cell_type, nrow = 2, scales = "free_y") +
+  xlab("Patient") +
+  ylab("xCell Score") 
+```
+
+
+```{r}
+colnames(deconvolution_epic) <- gsub("X", "", colnames(deconvolution_epic))
+deconvolution_epic_long <- deconvolution_epic %>% pivot_longer(!cell_type, names_to = "sample", values_to = "epic_score")
+```
+
+```{r}
+deconvolution_epic_filtered_long <- deconvolution_epic %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "uncharacterized cell")) %>% pivot_longer(!cell_type, names_to = "sample", values_to = "epic_score")
+deconvolution_epic_filtered_long_metadata <- full_join(deconvolution_epic_filtered_long, metadata)
+```
+
+```{r}
+# Plotting
+deconvolution_epic_filtered_long_metadata_ordered <- deconvolution_epic_filtered_long_metadata[order(deconvolution_epic_filtered_long_metadata$Patient),]
+epic_plot <- ggplot(deconvolution_epic_filtered_long_metadata_ordered, aes(x = as.character(Patient), y = epic_score, color = Condition)) +
+  geom_point(position = position_dodge(width = 0.8)) +
+    scale_x_discrete(limits = ord) +
+    theme(#panel.grid.major = element_blank(), 
+         #panel.grid.minor = element_blank(),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) + 
+  facet_wrap(~ cell_type, nrow = 2, scales = "free_y") +
+  xlab("Patient") +
+  ylab("EPIC Score") 
+```
+
+```{r}
+epic_plot
+```
+
+
+
+```{r}
+ggplot(deconvolution_epic_long, aes(x = sample, y = epic_score)) +
+  # Add the facet wrap
+  facet_wrap(~ cell_type, ncol = 2) +
+  # Add the points
+  geom_point() +
+  # Add the x-axis label
+  xlab("Sample") +
+  # Add the y-axis label
+  ylab("EPIC score") +
+  theme(axis.text = element_text(size = 8, angle = 90))
+```
+
+```{r}
+deconvolution_epic_long_metadata <- full_join(deconvolution_epic_long, metadata)
+#deconvolution_epic_filtered_long_metadata$cell_type <- relevel(deconvolution_epic_filtered_long_metadata$cell_type, 'Cancer associated fibroblast')
+
+epic_plot_stack <- deconvolution_epic_long_metadata %>% 
+  mutate(Condition = fct_relevel(Condition, "TAN", "CAF")) %>% 
+  mutate(epic_score = 100*epic_score) %>% 
+  ggplot(aes(x = Condition, y = epic_score, fill = cell_type)) +
+  geom_col() +
+  facet_wrap(~Patient, nrow=1, scales = "free_x", strip.position = "bottom") +
+    #theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),  
+          #axis.text.y = element_text(size = 12, face = "bold"), 
+          #axis.text.x = element_text(size = 8),
+          #strip.text.y = element_text(size = rel(100))
+          #) +
+  #ggtitle("CAF subpopulation proportions\n determined by CIBERSORTx") +   
+    scale_fill_manual(name=NULL,
+                    values = c(brewer.pal(8, "Dark2"))
+                    ) +
+  xlab(label = "Patient") + 
+  ylab("EPIC cell-type composition (%)") +
+  theme(#panel.grid.major = element_blank(), 
+        #panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) + 
+      scale_y_continuous(expand = c(0,0)) +
+  geom_hline(yintercept = c(25, 50, 75), color = "gray", linetype = "dashed") +
+  theme(legend.text=element_text(size=rel(1.2)),
+        axis.text.x = element_text(size = 8))
+
+
+ # labs(tag = "TAN = Tumour-associated normal\nCAF=Cancer-associated fibroblast") +
+  #  theme(plot.tag.position = c(0.9, 0.3),)
+
+  #+
+     # scale_y_continuous(expand = c(0, 0), limits = c(0, 1.0000001)) 
+```
+
+```{r}
+epic_plot_stack <- epic_plot_stack + theme(axis.text.x=element_text(angle=60, hjust=1)) 
+epic_plot_stack
+```
+
+```{r}
+cor.test(as.numeric(deconvolution_epic[which(deconvolution_epic$cell_type == "Cancer associated fibroblast"),c(2:ncol(deconvolution_epic))]), as.numeric(deconvolution_epic[which(deconvolution_epic$cell_type == "uncharacterized cell") ,c(2:ncol(deconvolution_epic))]))
+as.numeric(deconvolution_epic[which(deconvolution_epic$cell_type == "Cancer associated fibroblast"),c(2:ncol(deconvolution_epic))])
+```
+
+```{r}
+#cor.test(cibersort_caf_subpopulation_results$S1, as.numeric(deconvolution_epic[which(deconvolution_epic$cell_type == "Cancer associated fibroblast"),c(2:ncol(deconvolution_epic))]))
+
+```
+
+```{r}
+
+#deconvolution_epic_filter_long <- deconvolution_epic %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "uncharacterized cell")) %>% pivot_longer(!cell_type, names_to = "sample", values_to = "epic_score")
+deconvolution_epic_filter <- deconvolution_epic %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "uncharacterized cell"))
+deconvolution_epic_filter <- t(deconvolution_epic_filter)
+colnames(deconvolution_epic_filter) <- deconvolution_epic_filter[1,]
+deconvolution_epic_filter <- data.frame(deconvolution_epic_filter[-c(1),]) 
+deconvolution_epic_filter <- deconvolution_epic_filter %>% mutate(Sample = rownames(deconvolution_epic_filter))
+ggplot(data = deconvolution_epic_filter) + 
+  geom_point(mapping = aes(x = Cancer.associated.fibroblast, y = uncharacterized.cell)) +
+   theme(#axis.text.x=element_blank(), #remove x axis labels
+        axis.ticks.x=element_blank(), #remove x axis ticks
+        #axis.text.y=element_blank(),  #remove y axis labels
+        axis.ticks.y=element_blank()  #remove y axis ticks
+        ) +
+  #geom_text(data=subset(deconvolution_epic_filter, Sample == "4113"), aes(x = Cancer.associated.fibroblast, y = uncharacterized.cell, label = Sample),    vjust = 1.5)
+  geom_text(data=deconvolution_epic_filter, aes(x = Cancer.associated.fibroblast, y = uncharacterized.cell, label = Sample),    vjust = 1.5)
+```
+
+```{r}
+cibersort_caf_subpopulation_results <- read.csv("/home/rstudio/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv")
+```
+
+```{r}
+cibersort_caf_subpopulation_results$Mixture <- gsub("X", "",cibersort_caf_subpopulation_results$Mixture)
+colnames(cibersort_caf_subpopulation_results)[1] <- "Sample"
+cibersort_caf_subpopulation_results <- cibersort_caf_subpopulation_results %>% dplyr::select(-c("P.value", "Correlation", "RMSE"))
+```
+
+```{r}
+deconvolution_mcp_long <- deconvolution_mcp %>% pivot_longer(!cell_type, names_to = "sample", values_to = "mcp_counter_score")
+deconvolution_mcp_long$sample <- gsub("X", replacement = "", deconvolution_mcp_long$sample)
+ggplot(deconvolution_mcp_long, aes(x = sample, y = mcp_counter_score)) +
+  # Add the facet wrap
+  facet_wrap(~ cell_type, ncol = 2) +
+  # Add the points
+  geom_point() +
+  # Add the x-axis label
+  xlab("Sample") +
+  # Add the y-axis label
+  ylab("MCP counter score") +
+  theme(axis.text = element_text(size = 8, angle = 90))
+deconvolution_mcp_filter <- data.frame(t(deconvolution_mcp[which(deconvolution_mcp$cell_type =="Cancer associated fibroblast" ),]))
+colnames(deconvolution_mcp_filter) <- deconvolution_mcp_filter[1,]
+deconvolution_mcp_filter <- data.frame(deconvolution_mcp_filter[-1,])
+deconvolution_mcp_filter$Sample <- colnames(deconvolution_mcp)[2:ncol(deconvolution_mcp)]
+colnames(deconvolution_mcp_filter)[1] <- "mcp_counter_score_CAF"
+```
+
+```{r}
+deconvolution_mcp_filter
+```
+
+
+```{r}
+deconvolution_epic_cibersort_mcp_combined <- full_join(deconvolution_epic_filter, deconvolution_mcp_filter, by = "Sample")
+deconvolution_epic_cibersort_mcp_combined <- full_join(deconvolution_epic_cibersort_mcp_combined, cibersort_caf_subpopulation_results, by = "Sample")
+rownames(deconvolution_epic_cibersort_mcp_combined) <- deconvolution_epic_cibersort_mcp_combined$Sample
+deconvolution_epic_cibersort_mcp_combined <- deconvolution_epic_cibersort_mcp_combined %>% dplyr::select(-c(Sample)) %>% mutate_all(., function(x) as.numeric(as.character(x)))
+```
+
+```{r}
+corrplot(cor(deconvolution_epic_cibersort_mcp_combined))
+corrplot(cor(deconvolution_epic_cibersort_mcp_combined), method = 'square', order = 'FPC', type = 'lower', diag = FALSE)
+corrplot.mixed(cor(deconvolution_epic_cibersort_mcp_combined), order = 'AOE')
+
+```
+
+```{r}
+deconvolution_estimate <- immunedeconv::deconvolute_estimate(salmon_tpm_hgnc_not_duplicated)
+deconvolution_estimate
+```
+
+```{r}
+deconvolution_xcell_filtered_long_metadata_caf <- deconvolution_xcell_filtered_long_metadata %>% dplyr::filter(cell_type == "Cancer associated fibroblast")
+summary(deconvolution_xcell_filtered_long_metadata_caf)
+caf_xcell <- deconvolution_xcell_filtered_long_metadata_caf$xcell_score[which(deconvolution_xcell_filtered_long_metadata_caf$Condition == "CAF")]
+tan_xcell <- deconvolution_xcell_filtered_long_metadata_caf$xcell_score[which(deconvolution_xcell_filtered_long_metadata_caf$Condition == "TAN")]
+cor.test(x = caf_xcell, y = tan_xcell, 
+         method = c("pearson"), 
+         conf.level = 0.95)
+```
+
+```{r}
+par(pty = "s")
+boxplot(xcell_score ~ Condition, data = deconvolution_xcell_filtered_long_metadata_caf)
+boxplot(xcell_score ~ Condition, 
+        col = c("#003C67FF", "#EFC000FF"),
+        main = "XCell CAF score InHouse CAF vs TAN",
+        xlab = "Condition", ylab = "XCell Score", data = deconvolution_xcell_filtered_long_metadata_caf)
+```
+```{r}
+diff = caf_xcell - tan_xcell
+summary(diff)
+```
+
+
+```{r}
+bartlett.test(xcell_score ~ Condition, data = deconvolution_xcell_filtered_long_metadata_caf)
+```
+
+```{r}
+t.test(formula = xcell_score ~ Condition,
+       alternative = "two.sided",
+       mu = 0, 
+       paired = TRUE,   
+       var.equal = TRUE,
+       conf.level = 0.95, data = deconvolution_xcell_filtered_long_metadata_caf)
+```
+
+```{r}
+deconvolution_epic_filtered_long_metadata
+deconvolution_epic_filtered_long_metadata_caf <- deconvolution_epic_filtered_long_metadata %>% dplyr::filter(cell_type == "Cancer associated fibroblast")
+summary(deconvolution_epic_filtered_long_metadata_caf)
+caf_epic <- deconvolution_epic_filtered_long_metadata_caf$epic_score[which(deconvolution_epic_filtered_long_metadata_caf$Condition == "CAF")]
+tan_epic <- deconvolution_epic_filtered_long_metadata_caf$epic_score[which(deconvolution_epic_filtered_long_metadata_caf$Condition == "TAN")]
+cor.test(x = caf_epic, y = tan_epic, 
+         method = c("pearson"), 
+         conf.level = 0.95)
+```
+
+```{r}
+par(pty = "s")
+boxplot(epic_score ~ Condition, data = deconvolution_epic_filtered_long_metadata_caf)
+boxplot(epic_score ~ Condition, 
+        col = c("#003C67FF", "#EFC000FF"),
+        main = "EPIC CAF score InHouse CAF vs TAN",
+        xlab = "Condition", ylab = "EPIC Score", data = deconvolution_epic_filtered_long_metadata_caf)
+```
+
+```{r}
+bartlett.test(epic_score ~ Condition, data = deconvolution_epic_filtered_long_metadata_caf)
+
+t.test(formula = epic_score ~ Condition,
+       alternative = "two.sided",
+       mu = 0, 
+       paired = TRUE,   
+       var.equal = TRUE,
+       conf.level = 0.95, data = deconvolution_epic_filtered_long_metadata_caf)
+```
+
+```{r}
+deconvolution_mcp_filtered_long_metadata
+```
+
+```{r}
+deconvolution_compare_fibroblast_score_caf_tan <- function(df, score_column) {
+  df_caf <- df %>% dplyr::filter(cell_type == "Cancer associated fibroblast")
+  caf_score <- df_caf[[score_column]][which(df_caf$Condition == "CAF")]
+  tan_score <- df_caf[[score_column]][which(df_caf$Condition == "TAN")]
+  print("carrying out correlation test...")
+  print(cor.test(x = caf_score, y = tan_score, 
+         method = c("pearson"), 
+         conf.level = 0.95))
+  plt_title <- paste(score_column, " cancer-associated fibroblast for inhouse CAF vs TAN")
+  par(pty = "s")
+  #boxplot(score_column ~ Condition, data = df_caf)
+  #plot_out <- boxplot(df_caf[,score_column] ~ df_caf[,Condition], 
+   #     col = c("#003C67FF", "#EFC000FF"),
+    #    main = plt_title,
+     #   xlab = "Condition", ylab = score_column)
+  print(df_caf)
+  plot_out <- ggplot(data = df_caf, aes(Condition, .data[[score_column]])) + 
+              geom_boxplot(outlier.colour="red", outlier.shape=8, outlier.size=4)
+  
+  bartlet_out <- bartlett.test(df_caf[[score_column]] ~ df_caf$Condition, data = df_caf)
+  if (bartlet_out$p.value > 0.05){
+    print("variances equal, carry out t-test")
+    t.test.out <- t.test(formula = df_caf[[score_column]] ~ df_caf$Condition,
+       alternative = "two.sided",
+       mu = 0, 
+       paired = TRUE,   
+       var.equal = TRUE,
+       conf.level = 0.95, data = df_caf)
+  }
+  outputs <- list(plot_out, bartlet_out, t.test.out)
+  
+  return(outputs)
+}
+
+out_mcp <- deconvolution_compare_fibroblast_score_caf_tan(deconvolution_mcp_filtered_long_metadata, "mcp_score")
+
+out_mcp[[1]]
+out_mcp[[2]]
+out_mcp[[3]]
+```
+
+```{r}
+deconvolution_compare_celltype_score_caf_tan <- function(df, score_column, cell_type_in) {
+  df_cell_type <- df %>% dplyr::filter(cell_type == cell_type_in)
+    caf_score <- df_cell_type[[score_column]][which(df_cell_type$Condition == "CAF")]
+  tan_score <- df_cell_type[[score_column]][which(df_cell_type$Condition == "TAN")]
+  print("carrying out correlation test...")
+  print(cor.test(x = caf_score, y = tan_score, 
+         method = c("pearson"), 
+         conf.level = 0.95))
+  plot_out <- ggplot(data = df_cell_type, aes(Condition, .data[[score_column]])) + 
+              geom_boxplot(outlier.colour="red", outlier.shape=8, outlier.size=4)
+  
+  bartlet_out <- bartlett.test(df_cell_type[[score_column]] ~ df_cell_type$Condition, data = df_cell_type)
+  print(bartlet_out)
+  if (bartlet_out$p.value > 0.05) {
+    print("variances equal, carry out t-test equal variance")
+    t.test.out <- t.test(formula = df_cell_type[[score_column]] ~ df_cell_type$Condition,
+       alternative = "two.sided",
+       mu = 0, 
+       paired = TRUE,   
+       var.equal = TRUE,
+       conf.level = 0.95, data = df_cell_type)
+   } else {
+      print("variances not equal, carry out t-test unequal variance")
+      t.test.out <- t.test(formula = df_cell_type[[score_column]] ~ df_cell_type$Condition,
+       alternative = "two.sided",
+       mu = 0, 
+       paired = TRUE,   
+       var.equal = FALSE,
+       conf.level = 0.95, data = df_cell_type)
+    }
+  
+  outputs <- list(plot_out, bartlet_out, t.test.out)
+  return(outputs)
+}
+deconvolution_compare_celltype_score_caf_tan(deconvolution_mcp_filtered_long_metadata, "mcp_score", "Endothelial cell")
+```
+
+```{r}
+deconvolution_compare_celltype_score_caf_tan(deconvolution_xcell_filtered_long_metadata, "xcell_score", "microenvironment score")
+deconvolution_compare_celltype_score_caf_tan(deconvolution_xcell_filtered_long_metadata, "xcell_score", "stroma score")
+deconvolution_compare_celltype_score_caf_tan(deconvolution_xcell_filtered_long_metadata, "xcell_score", "Hematopoietic stem cell")
+
+```
+
+```{r}
+metadata
+salmon_markers <- data.frame(t(salmon_tpm_hgnc_not_duplicated[c("ACTA2","FAP"),]))
+salmon_markers$sample <- rownames(salmon_markers)
+metadata_markers <- full_join(metadata, salmon_markers)
+```
+
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/xcell_deconv_caf.svg")
+xcell_plot
+dev.off()
+```
+
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/epic_deconv_caf_stack.svg")
+epic_plot_stack
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/mcp_deconv_caf.svg")
+mcp_plot
+dev.off()
+```
+

@@ -1,0 +1,1819 @@
+---
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    highlight: zenburn
+    theme: flatly
+params:
+  method: ""
+  inhouse_metadata: ""
+  tx2gene: ""
+  versions: ""
+  basedir: ""
+---
+
+params removed:   output_dir: ""
+
+```{R, message=F, warning=F}
+library(knitr)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(DESeq2)
+library(GOSemSim)
+library(apeglm)
+library(org.Hs.eg.db)
+library(RColorBrewer)
+library(enrichplot)
+library(IHW)
+library(pheatmap)
+library(PCAtools)
+library(EnhancedVolcano)
+library(pvclust)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(DT)
+library(clusterProfiler)
+library(ggplot2)
+library(tidyverse)
+#library(dplyr)
+library(ggpubr)
+library(vsn)
+library(hexbin)
+library(geneplotter)
+
+get_upregulated <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange>=1)], rownames(df)[which(df$padj<=0.05)])
+
+  results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+get_downregulated <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange<=-1)], rownames(df)[which(df$padj<=0.05)])
+
+    results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+annotate_de_genes <- function(df){
+
+    df$hgnc_symbol <- rownames(df)
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl") #, host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description"),
+                  filters = c("hgnc_symbol"),
+                  values = df$hgnc_symbol,
+                  mart = mart,
+                  useCache=FALSE)
+
+    tmp <- merge(df, info, by="hgnc_symbol")
+    tmp$strand <- gsub("-1", "-", tmp$strand)
+    tmp$strand <- gsub("1", "+", tmp$strand)
+    #tmp$hgnc_symbol <- make.names(tmp$hgnc_symbol, unique = T)
+    tmp <- tmp[!grepl("CHR", tmp$chromosome_name),]
+
+    #output_col <- c("Gene", "Ensembl ID", "Chromosome", "Start", "Stop", "Strand", "Description", "Log2FC", "P-value", "Adj P-value")
+    output_col <- c("Gene", "Ensembl ID", "Chromosome", "Start", "Stop", "Strand", "Description", "log2FoldChange", "P-value", "Adj P-value")
+    tmp <- subset(tmp, select=c(hgnc_symbol, ensembl_gene_id_version, chromosome_name, start_position, end_position, strand, entrezgene_description, log2FoldChange, pvalue, padj))
+    colnames(tmp) <- output_col
+
+    if(min(tmp$log2FoldChange) > 0){
+        tmp <- tmp[order(-tmp$log2FoldChange),]
+    }else{
+        tmp <- tmp[order(tmp$log2FoldChange),]
+    }
+
+    return(tmp)
+
+}
+
+annotate_de_genes_ensembl_gene_id <- function(df){
+    ensembl_gene_id_base <- str_split_fixed(rownames(df), n = 2, pattern = "\\.")[,1]
+    df$ensembl_gene_id <- ensembl_gene_id_base
+    mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl") #, host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description"),
+                  filters = c("ensembl_gene_id"),
+                  values = df$ensembl_gene_id,
+                  mart = mart,
+                  useCache=FALSE)
+
+    tmp <- merge(df, info, by="ensembl_gene_id")
+    tmp$strand <- gsub("-1", "-", tmp$strand)
+    tmp$strand <- gsub("1", "+", tmp$strand)
+    #tmp$hgnc_symbol <- make.names(tmp$hgnc_symbol, unique = T)
+    tmp <- tmp[!grepl("CHR", tmp$chromosome_name),]
+
+    #output_col <- c("Gene", "Ensembl ID", "Chromosome", "Start", "Stop", "Strand", "Description", "Log2FC", "P-value", "Adj P-value")
+    output_col <- c("Gene", "Ensembl ID", "Chromosome", "Start", "Stop", "Strand", "Description", "log2FoldChange", "P-value", "Adj P-value")
+    tmp <- subset(tmp, select=c(hgnc_symbol, ensembl_gene_id, chromosome_name, start_position, end_position, strand, entrezgene_description, log2FoldChange, pvalue, padj))
+    colnames(tmp) <- output_col
+
+    if(min(tmp$log2FoldChange) > 0){
+        tmp <- tmp[order(-tmp$log2FoldChange),]
+    }else{
+        tmp <- tmp[order(tmp$log2FoldChange),]
+    }
+
+    return(tmp)
+
+}
+
+
+convert_ensg_version_to_hgnc <- function(pca_object, ensdb = EnsDb.Hsapiens.v86){
+  library(AnnotationDbi)
+  library(ensembldb)
+  library(EnsDb.Hsapiens.v86)
+  genes_base <- str_split_fixed(string = rownames(p$loadings), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+  # keep ensg version of newnames is na or is duplicated
+  newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+  rownames(p$loadings), newnames_original)
+  rownames(p$loadings) <- newnames
+}
+
+convert_ensg_version_to_hgnc_df_rownames <- function(df, ensdb = EnsDb.Hsapiens.v86){
+  library(AnnotationDbi)
+  library(ensembldb)
+  library(EnsDb.Hsapiens.v86)
+  genes_base <- str_split_fixed(string = rownames(df), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+# keep ensg version of newnames is na or is duplicated
+newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+    rownames(df), newnames_original)
+rownames(df) <- newnames
+return(df)
+}
+```
+
+
+# RNA-Seq analysis
+*Barry Digby, Pilib O Broin* 
+
+# Software Versions
+
+```{r Input files,  message=F, warning=F}
+if (params$method == "nextflow") {
+  # params$versions
+  versions <- read.csv(params$versions, header=T, sep=",")
+  versions2 <- data.frame(Tool_Versions = t(versions[1,]))
+  versions2 <- data.frame(paste(colnames(versions), versions[1,]))
+  colnames(versions2) <- "Tool Versions"
+  # params$inhouse_metadata
+  inhouse_metadata <- params$inhouse_metadata
+  # params$tx2gene
+  tx2gene_path <- params$tx2gene
+  tx2gene <- read.table(tx2gene_path, header = T)
+  # params$basedir
+  basedir <- params$basedir
+  
+  #metadata_path <- params$metadata
+  #print(paste("metadata file: ", metadata_path))
+  #tx2gene_file <- params$tx2gene
+  #print(paste("tx2gene file: ", tx2gene_file))
+  #metadata_original <- read.table(params$metadata_without_patient)
+} else {
+  versions <- read.csv("~/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/pipeline_info/software_versions_converted.csv", header=T, sep=",")
+versions2 <- data.frame(Tool_Versions = t(versions[1,]))
+versions2 <- data.frame(paste(colnames(versions), versions[1,]))
+colnames(versions2) <- "Tool Versions"
+  
+  inhouse_metadata <- "~/Documents/PhD/CAF_data/InHouse/reformat_samples.csv"
+
+  tx2gene_path = "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+  tx2gene <- read.table(tx2gene_path, header = T)
+  
+  basedir <- "~/Documents/PhD/CAF_data/"
+  
+  #metadata_path <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata_by_patient/metadata_with_patient.txt"
+  #out <- "out.txt"
+  #metadata_original <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt")
+}
+```
+
+
+```{R, message=F, warning=F}
+#versions <- read.csv("/data/projects/D_O_Connor/nf-core_results/pipeline_info/software_versions.csv", header=F, sep=",")
+#versions <- read.csv("~/Documents/PhD/rna_seq_bc/metadata/software_versions.csv", header=F, sep=",")
+# versions <- read.csv("~/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/pipeline_info/software_versions_converted.csv", header=T, sep=",")
+# versions2 <- data.frame(Tool_Versions = t(versions[1,]))
+# versions2 <- data.frame(paste(colnames(versions), versions[1,]))
+# colnames(versions2) <- "Tool Versions"
+
+DT::datatable(versions2)
+```
+
+
+```{R, message=F, warning=F}
+samples <- read.csv(inhouse_metadata, header=T, row.names = "samples")
+samples$ER <- gsub("_negative", "-", samples$ER)
+samples$ER <- gsub("_positive", "+", samples$ER)
+samples$LVI <- gsub("_negative", "-", samples$LVI)
+samples$LVI <- gsub("_positive", "+", samples$LVI)
+samples$PR <- gsub("_negative", "-", samples$PR)
+samples$PR <- gsub("_positive", "+", samples$PR)
+samples$Condition <- gsub("Tumour", "CAF", samples$Condition)
+samples$Condition <- gsub("Normal", "TAN", samples$Condition)
+samples$Patient <- as.factor(samples$Patient)
+
+# tx2gene
+#httr::set_config(httr::config(ssl_verifypeer = FALSE))
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")# = "uswest") #, host="uswest")
+tx2gene_biomart <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+
+## already read in above!!
+
+
+#read in salmon
+#dir <- "/home/kevin/Documents/PhD/rna_seq_bc/nf-core_results/star_salmon/"
+# NOTE: nf-core rna-seq version not the same!!!a
+dir <- paste(basedir, "nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon", sep = "")
+
+files <- file.path(dir, rownames(samples), "quant.sf")
+names(files) <- rownames(samples)
+txi.salmon <- tximport(files, type = "salmon", tx2gene = tx2gene)
+dds <- DESeqDataSetFromTximport(txi.salmon, colData = samples, design = ~ Patient + Condition)
+dds$Condition <- relevel(dds$Condition, ref = "TAN")
+dds <- DESeq(dds)
+```
+
+# Exploratory Data analysis 
+
+## Marker gene expression
+
+To verify the purity of the fibroblast samples, we can look at the expression level of some marker genes, as suggested by Kazakova et al.:
+ACTA2, VIM, FAP (fibroblast markers)
+EPCAM (epithelial cells),VE-cahedrin (endothelial cells), E-cahedrin (epithelial cells), CALD1 (pericytes), SMTN (smooth muscle cells), PTPRC (leukocytes) and PECAM1 (endothelial cells)
+
+```{r}
+fibroblast_markers <- c("ACTA2", "VIM", "FAP")
+# CDH1 == E-cahedrin, CDH5 == VE-cahedrin
+non_fibroblast_markers <- c("EPCAM", "CDH5", "CDH1", "CALD1", "SMTN", "PTPRC", "PECAM1")
+
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl") #, host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = fibroblast_markers,
+                  mart = mart,
+                  useCache=FALSE)
+
+info_non_fibroblast <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = non_fibroblast_markers,
+                  mart = mart,
+                  useCache=FALSE)
+
+fibroblast_markers_ensembl <- unique (grep(paste(info$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+non_fibroblast_markers_ensembl <-  unique (grep(paste(info_non_fibroblast$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+tpm_data_salmon <- read.table(file = paste(dir, "salmon.merged.gene_tpm.tsv", sep = "/"), header = T)
+#plot(tpm_data_salmon[tpm_data_salmon$gene_name == "ACTA2", c(3:ncol(tpm_data_salmon))])
+#s
+fibroblast_markers_tpm <- tpm_data_salmon %>% dplyr::filter(gene_name %in% fibroblast_markers) %>% dplyr::select(-gene_id) %>% pivot_longer(cols = c(2:ncol(.)))
+non_fibroblast_markers_tpm <- tpm_data_salmon %>% dplyr::filter(gene_name %in% non_fibroblast_markers) %>% dplyr::select(-gene_id) %>% pivot_longer(cols = c(2:ncol(.)))
+ggplot(fibroblast_markers_tpm, aes(x=gene_name, y=value)) + 
+  geom_jitter(position=position_jitter(0.2))+ 
+  ggtitle("Expression level of CAF markers")
+
+ggplot(non_fibroblast_markers_tpm, aes(x=gene_name, y=value)) + 
+  geom_jitter(position=position_jitter(0.2)) + 
+  ggtitle("Expression level of non-CAF markers")
+tpm_table <- list()
+genes <- c()
+for (i in 1:length(non_fibroblast_markers)){
+  gene <- non_fibroblast_markers[i]
+  genes <- c(genes, gene)
+  tpm_range <- range(non_fibroblast_markers_tpm$value[which(non_fibroblast_markers_tpm$gene_name == gene)])
+  tpm_table[[i]] <- tpm_range
+}
+tpm_table <- data.frame(tpm_table)
+colnames(tpm_table) <- genes
+rownames(tpm_table) <- c("Min", "Max")
+#library(xtable)
+#print(xtable(tpm_table), include.rownames = TRUE)
+
+```
+
+```{r}
+subpopulation_markers <- c("FAP", "ACTA2", "PDPN", "PDGFRB", "ITGB1")
+info_subpopulation <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = subpopulation_markers,
+                  mart = mart,
+                  useCache=FALSE) 
+subpopulation_markers_ensembl <- unique (grep(paste(info_subpopulation$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+subpopulation_markers_ensembl
+```
+
+
+
+## Data Transformations
+
+### MeanSDPlot
+
+Traditionally in data science, the most obvious choice of transformation is taking the logarithm $y = log_2(n + n_0)$, whereby $n$ represents a genes count value and $n_0$ is a positive constant (i.e a pseudocount). 
+
+This choice performs poorly when transforming RNA-Seq count data, as many genes have extremely low counts, or 0 counts. Thus, by adding a pseudocount (of +1) and taking the logarithm base 2, this has the effect of over inflating low gene counts. In the `Log2 + 1` plot below, we see that lowly expressed genes (low mean) exhibit high standard deviations as a result of the `Log2 +1` transformation, and thus overly contribute towards the variance in the transformed dataset. When computing the sample to sample distance matrix, these lowly expressed genes will contribute a great amount of noise to the final values computed. 
+
+To remedy this, the authors of `DESeq2` have designed a `Regularized logarithm` transformation, $log_2(q_ij) = \beta_i0 + \beta_ij$ transforming the data to the `log2` scale by fitting a model with a term for each sample and a prior distribution on the coefficients which is estimated from the data. That is to say, it transforms the dataset to the `log2` count in a way which minimizes differences between samples for rows (genes) with small counts. In the plot below, we see that genes with low counts (mean) are indeed shrunk towards zero and will not contribute greatly to the overall variance in the dataset. 
+
+```{R, message=F, warning=F}
+nt <- assay(normTransform(dds))
+x <- meanSdPlot(nt, ranks=FALSE, plot=FALSE)
+x$gg + ggtitle("Log2 + 1 Transformation")
+
+rld <- assay(rlog(dds, blind=FALSE))
+
+y <- meanSdPlot(rld, ranks = FALSE, plot = FALSE)
+y$gg + ggtitle("Regularized-Logarithm Transformation")
+```
+
+## Sample Heatmap
+
+```{R, fig.width=10, fig.height=6}
+subs_samp <- subset(samples, select=-c(Age, Size))
+
+sampleDists <- dist(t(rld))
+sampleDistMatrix <- as.matrix(sampleDists)
+colnames(sampleDistMatrix) <- rownames(samples)
+ann_colors = list(Condition=c(CAF = "forestgreen",  TAN = "gold"),
+                  Grade = c(Grade_2 = "dodgerblue4", Grade_3 = "grey3"),
+                  Histology = c(Ductal = "magenta3", Lobular = "chartreuse1"),
+                  ER = c('ER+' = "black", 'ER-' = "grey67"),
+                  LVI = c('LVI-' = "palegreen", 'LVI+' = "palevioletred"),
+                  PR = c('PR-' = "royalblue", 'PR+' = "red"))
+heatmap_caf_tan <- pheatmap(mat=sampleDistMatrix,
+         show_rownames = TRUE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         show_colnames = TRUE,
+         annotation_col = subs_samp,
+         annotation_colors = ann_colors,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+heatmap_caf_tan
+```
+
+## PCA {.tabset} 
+
+### TAN vs. CAF {.tabset}
+
+#### Pairs plot
+
+```{R, message=F, warning=F, fig.width=10, fig.height=8}
+p <- pca(rld, metadata = samples)
+
+pairsplot(p, 
+          components = getComponents(p, c(1:6)), 
+          colby = 'Condition',
+          colkey = c('TAN'='royalblue', 'CAF'='red1'), 
+          triangle = F,
+          plotaxes = T,
+          axisLabSize = 8,
+          hline = 0,
+          hlineType = "dashed",
+          hlineCol = "grey10",
+          hlineWidth = 0.2,
+          vline = 0,
+          vlineType = "dashed",
+          vlineCol = "grey10",
+          vlineWidth = 0.2,
+          borderWidth = 0.5,
+          title = "PCA pairsplot (components 1:6)\nTAN blue, CAF red",
+          titleLabSize = 12)
+```
+
+#### PC1 vs PC2
+
+```{R, message=F, warning=F}
+biplot(p,
+       colby = 'Condition',
+       colkey = c('TAN'='royalblue', 'CAF'='red1'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC2',
+       encircle = T)
+```
+
+#### PC1 vs PC3
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC1", 
+       y = "PC3",
+       colby = 'Condition',
+       colkey = c('TAN'='royalblue', 'CAF'='red1'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC3',
+       encircle = T)
+```
+
+#### PC1 vs PC4
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC1", 
+       y = "PC4",
+       colby = 'Condition',
+       colkey = c('TAN'='royalblue', 'CAF'='red1'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC4',
+       encircle = T,
+       gridlines.minor = T,
+       gridlines.major = T)
+```
+
+#### PC1 vs PC5
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC1", 
+       y = "PC5",
+       colby = 'Condition',
+       colkey = c('TAN'='royalblue', 'CAF'='red1'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC5',
+       encircle = T)
+```
+
+#### PC1 vs PC6
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC1", 
+       y = "PC6",
+       colby = 'Condition',
+       colkey = c('TAN'='royalblue', 'CAF'='red1'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC6',
+       encircle = T)
+```
+
+#### Loadings
+
+```{R, message=F, warning=F, fig.height=8, fig.width=6}
+plt <- plotloadings(p,
+             components = getComponents(p, c(1)),
+             absolute = F,
+    rangeRetain = 0.15,
+    labSize = 5.0,
+        ylim = c(-0.09,0.125),
+    title = 'Loadings plot',
+    subtitle = 'PC1',
+    caption = 'Top 15% variables',
+    shape = 21,
+    col = c('royalblue', 'grey70', 'red3'),
+    drawConnectors = T, positionConnectors = 'right')
+
+plot(plt)
+
+plt_df <- plt$data
+plt_df <- plt_df[order(plt_df$Loading, decreasing = T),]
+
+info <- getBM(attributes=c("hgnc_symbol",
+              "entrezgene_description",
+              "ensembl_gene_id_version"),
+              filters=c("hgnc_symbol"),
+              values = plt_df$var,
+              mart=mart,
+              useCache = F,
+              uniqueRows = T)
+
+info <- info[-c(8),]
+
+tmp <- merge(info, plt_df, by.x="hgnc_symbol", by.y="var")
+tmp <- tmp[order(tmp$Loading, decreasing = T),]
+
+DT::datatable(tmp, rownames = F)
+```
+
+### LVI Status {.tabset}
+
+#### Pairs plot
+
+```{R, message=F, warning=F, fig.width=10, fig.height=8}
+pairsplot(p, 
+          components = getComponents(p, c(1:6)), 
+          colby = 'LVI',
+          colkey = c('LVI-'='forestgreen', 'LVI+'='purple'),
+          shape = "Condition",
+          shapekey = c(16,17),
+          triangle = F,
+          plotaxes = T,
+          axisLabSize = 8,
+          hline = 0,
+          hlineType = "dashed",
+          hlineCol = "grey10",
+          hlineWidth = 0.2,
+          vline = 0,
+          vlineType = "dashed",
+          vlineCol = "grey10",
+          vlineWidth = 0.2,
+          borderWidth = 0.5,
+          title = "PCA pairsplot (components 1:6)\nLVI- green, LVI+ purple",
+          titleLabSize = 12)
+```
+
+#### PC1 vs PC4
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC4", 
+       y = "PC1",
+       colby = 'LVI',
+       colkey = c('LVI-'='forestgreen', 'LVI+'='purple'), 
+       shape = "Condition",
+       shapekey = c(16,17),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC4',
+       encircle = T)
+```
+
+#### PC3 vs PC4
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC4", 
+       y = "PC3",
+        colby = 'LVI',
+        colkey = c('LVI-'='forestgreen', 'LVI+'='purple'),
+          shape = "Condition",
+          shapekey = c(16,17),       
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC4 versus PC3',
+       encircle = T)
+```
+
+#### PC5 vs PC4
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC4", 
+       y = "PC5",
+        colby = 'LVI',
+        colkey = c('LVI-'='forestgreen', 'LVI+'='purple'), 
+                 shape = "Condition",
+          shapekey = c(16,17),  
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC4 versus PC5',
+       encircle = T)
+```
+
+#### Loadings
+
+```{R, message=F, warning=F, fig.height=8, fig.width=6}
+plt <- plotloadings(p,
+             components = getComponents(p, c(4)),
+             absolute = F,
+    rangeRetain = 0.15,
+    labSize = 5.0,
+        ylim = c(-0.09,0.125),
+    title = 'Loadings plot',
+    subtitle = 'PC4',
+    caption = 'Top 15% variables',
+    shape = 21,
+    col = c('royalblue', 'grey70', 'red3'),
+    drawConnectors = T, positionConnectors = 'right')
+
+plot(plt)
+
+plt_df <- plt$data
+plt_df <- plt_df[order(plt_df$Loading, decreasing = T),]
+
+info <- getBM(attributes=c("hgnc_symbol",
+              "entrezgene_description"),
+              filters=c("hgnc_symbol"),
+              values = plt_df$var,
+              mart=mart,
+              useCache = F,
+              uniqueRows = T)
+
+info <- info[-c(5),]
+
+tmp <- merge(info, plt_df, by.x="hgnc_symbol", by.y="var")
+tmp <- tmp[order(tmp$Loading, decreasing = T),]
+
+DT::datatable(tmp, rownames = F)
+```
+
+### PR Status {.tabset}
+
+#### Pairs plot
+
+```{R, message=F, warning=F, fig.width=10, fig.height=8}
+pairsplot(p, 
+          components = getComponents(p, c(1:6)), 
+          colby = 'PR',
+          colkey = c('PR-'='darkgoldenrod3', 'PR+'='maroon4'), 
+          triangle = F,
+          plotaxes = T,
+          axisLabSize = 8,
+          hline = 0,
+          hlineType = "dashed",
+          hlineCol = "grey10",
+          hlineWidth = 0.2,
+          vline = 0,
+          vlineType = "dashed",
+          vlineCol = "grey10",
+          vlineWidth = 0.2,
+          borderWidth = 0.5,
+          title = "PCA pairsplot (components 1:6)\nPR- darkgold, LVI+ maroon",
+          titleLabSize = 12)
+```
+
+#### PC1 vs PC2
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC2", 
+       y = "PC1",
+        colby = 'PR',
+        colkey = c('PR-'='darkgoldenrod3', 'PR+'='maroon4'),
+                        shape = "Condition",
+          shapekey = c(16,17),  
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC2',
+       encircle = T)
+```
+
+#### PC2 vs PC3
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC2", 
+       y = "PC3",
+        colby = 'PR',
+        colkey = c('PR-'='darkgoldenrod3', 'PR+'='maroon4'),
+                        shape = "Condition",
+          shapekey = c(16,17),  
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC2 versus PC3',
+       encircle = T)
+```
+
+#### PC2 vs PC4
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC2", 
+       y = "PC4",
+        colby = 'PR',
+        colkey = c('PR-'='darkgoldenrod3', 'PR+'='maroon4'),
+                        shape = "Condition",
+          shapekey = c(16,17),  
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC2 versus PC4',
+       encircle = T)
+```
+
+#### PC2 vs PC5
+
+```{R, message=F, warning=F}
+
+biplot(p,
+       x = "PC2", 
+       y = "PC5",
+        colby = 'PR',
+        colkey = c('PR-'='darkgoldenrod3', 'PR+'='maroon4'),
+                        shape = "Condition",
+          shapekey = c(16,17),  
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       lab = rownames(samples),
+       drawConnectors = TRUE,
+       title = 'PCA bi-plot',
+       subtitle = 'PC2 versus PC5',
+       encircle = T)
+```
+
+#### Loadings
+
+```{R, message=F, warning=F, fig.height=8, fig.width=6}
+plt <- plotloadings(p,
+             components = getComponents(p, c(2)),
+             absolute = F,
+    rangeRetain = 0.15,
+    labSize = 5.0,
+        ylim = c(-0.09,0.125),
+    title = 'Loadings plot',
+    subtitle = 'PC2',
+    caption = 'Top 15% variables',
+    shape = 21,
+    col = c('royalblue', 'grey70', 'red3'),
+    drawConnectors = T, positionConnectors = 'right')
+
+plot(plt)
+
+plt_df <- plt$data
+plt_df <- plt_df[order(plt_df$Loading, decreasing = T),]
+
+info <- getBM(attributes=c("hgnc_symbol",
+              "entrezgene_description", "ensembl_gene_id_version"),
+              #filters=c("hgnc_symbol"),
+              filters=c("ensembl_gene_id_version"),
+              values = plt_df$var,
+              mart=mart,
+              useCache = F,
+              uniqueRows = T)
+
+
+#tmp <- merge(info, plt_df, by.x="hgnc_symbol", by.y="var")
+tmp <- merge(info, plt_df, by.x="ensembl_gene_id_version", by.y="var")
+tmp <- tmp[order(tmp$Loading, decreasing = T),]
+
+DT::datatable(tmp, rownames = F)
+```
+
+## Clinical Correlations
+
+```{R, message=F, warning=F, fig.width=10}
+  eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(samples),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PC1-10 clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+# Differentially Expressed Genes TAN vs. CAF {.tabset}
+
+```{R, message=F, warning=F}
+# original method
+res <- results(dds, filterFun = ihw, alpha = 0.05, c("Condition", "CAF", "TAN"))
+coefficient <- length(resultsNames(dds))
+lfc <- lfcShrink(dds = dds, res = res, coef = coefficient, type = "apeglm")
+lfc_df <- as.data.frame(lfc)
+
+up_unannotated <- get_upregulated(lfc_df)
+down_unannotated <- get_downregulated(lfc_df)
+
+# convert ensembl gene id version to hgnc symbol
+#up <- convert_ensg_version_to_hgnc_df_rownames(up)
+#down <- convert_ensg_version_to_hgnc_df_rownames(down)
+
+
+#up <- annotate_de_genes(up)
+#down <- annotate_de_genes(down)
+up <- annotate_de_genes_ensembl_gene_id(up_unannotated)
+down <- annotate_de_genes_ensembl_gene_id(down_unannotated)
+```
+
+```{R, message=F, warning=F}
+# alternative method - get very few DE genes
+# res2 <- results(dds, alpha = 0.05, c("Condition", "CAF", "TAN"), altHypothesis = "greaterAbs", lfcThreshold = 1)#  filterFun = ihw,
+# coefficient <- length(resultsNames(dds))
+# lfc2 <- lfcShrink(dds = dds, res = res2, coef = coefficient, type = "apeglm")
+# lfc_df2 <- as.data.frame(lfc2)
+# 
+# up2 <- get_upregulated(lfc_df2)
+# down2 <- get_downregulated(lfc_df2)
+# 
+# # convert ensembl gene id version to hgnc symbol
+# up2 <- convert_ensg_version_to_hgnc_df_rownames(up2)
+# down2 <- convert_ensg_version_to_hgnc_df_rownames(down2)
+# 
+# 
+# up2 <- annotate_de_genes(up2)
+# down2 <- annotate_de_genes(down2)
+```
+
+## Up Regulated CAF
+
+```{R, message=F, warning=F}
+DT::datatable(up, rownames = FALSE, options=list(scrollX=T))
+```
+
+## Down Regulated CAF
+
+```{R, message=F, warning=F}
+DT::datatable(down, rownames = FALSE, options=list(scrollX=T))
+```
+
+Note: there is one upregulated gene and one downregulated gene that could not be annotated with `bioMart`:
+
+```{r}
+outersect <- function(x, y) {
+  sort(c(setdiff(x, y),
+         setdiff(y, x)))
+}
+
+up_unannotated_genes <- str_split_fixed(rownames(up_unannotated), n = 2, pattern = "\\.")[,1]
+down_unannotated_genes <- str_split_fixed(rownames(down_unannotated), n = 2, pattern = "\\.")[,1]
+print(paste("Upregulated gene unannotated:", outersect(up_unannotated_genes, up$`Ensembl ID`)))
+print(paste("Downregulated gene unannotated:", outersect(down_unannotated_genes, down$`Ensembl ID`)))
+
+up_unannotated_genes_blank <- str_split_fixed(rownames(up_unannotated), n = 2, pattern = "\\.")[,1]
+down_unannotated_genes <- str_split_fixed(rownames(down_unannotated), n = 2, pattern = "\\.")[,1]
+print(paste("Upregulated gene unannotated:", outersect(up_unannotated_genes, up$`Ensembl ID`)))
+print(paste("Downregulated gene unannotated:", outersect(down_unannotated_genes, down$`Ensembl ID`)))
+
+```
+
+Both these genes are novel lncRNAs.
+
+## MA Plot
+
+Below demonstrates the effect of `apeglm`, the shrinkage estmator designed by the authors of `DESeq2`. Per the `apeglm` paper: 
+
+> When the counts of sequenced reads are small or have a high coefficient of variation in one or a subset of the conditions, the estimated LFCs will have high variance, leading to some large estimated LFCs, which do not represent true large differences in expression ... Here, we propose the use of a heavy-tailed Cauchy prior distribution for effect sizes, which avoids the use of filter thresholds (removing lowly expressed genes -- problem with this is where do we set the cutoff?) or pseudocounts. The proposed method, Approximate Posterior Estimation for generalized linear model, `apeglm`, has lower bias than previously proposed shrinkage estimators, while still reducing variance for those genes with little information for statistical inference.
+
+Essentially, the formula shrinks the effect size (Log2FoldChange) of genes with low counts and high variability (recall the WT1 boxplot, given below) while preserving the true large effect sizes in the biological contrast of interest (CAF vs. TAN). 
+
+This shrinkage is evident in the MAplots given below, which plot each genes normalised expression and log2foldchange value. 
+
+```{R, fig.height=5, fig.width=5}
+wt1_ensembl <- rownames(up_unannotated[which(grepl("ENSG00000184937", rownames(up_unannotated)) == TRUE),])
+plotCounts(dds, gene=wt1_ensembl, intgroup="Condition", main = "WT1")
+```
+
+
+```{R, message=F, warning=F, fig.width=8, fig.heigth=10}
+# ma plot using res object - before shrinkage - but use shrunken LFCs to pick DE genes
+maplot <- plotMA(res, returnData=T)
+maplot$isDE <- ifelse(maplot$lfc >= 1 | maplot$lfc <= -1, TRUE, FALSE)
+#maplot$isDE <- ifelse(maplot$lfc <= -1, TRUE, FALSE)
+geneplotter::plotMA(maplot, ylim=c(-3,3), main = "CAF vs. TAN DEGs LFC > |1| & alpha = 0.05 \n no shrinkage", alpha = 0.05)
+```
+
+
+```{R, message=F, warning=F, fig.width=8, fig.heigth=10}
+maplot <- plotMA(lfc, returnData=T)
+maplot$isDE <- ifelse(maplot$lfc >= 1 | maplot$lfc <= -1, TRUE, FALSE)
+#maplot$isDE <- ifelse(maplot$lfc <= -1, TRUE, FALSE)
+geneplotter::plotMA(maplot, ylim=c(-3,3), main = "CAF vs. TAN DEGs LFC > |1| & alpha = 0.05 \n with shrinkage", alpha = 0.05)
+```
+
+## Volcano Plot
+
+```{R, message=F, warning=F, fig.width=10, fig.height=8}
+ volcano_caf_tan_lfc_1 <- EnhancedVolcano(lfc,
+    lab = rownames(lfc),
+    labSize = 0,
+    pointSize = 1.2,
+    FCcutoff = 1, 
+    pCutoff = 0.05,
+    title = "CAF vs TAN LFC > |1| & padj > 0.05",
+    subtitle = "",
+    legendPosition = 'none',
+    pCutoffCol = 'padj',
+    x = 'log2FoldChange',
+    y = 'padj',
+    ylim = c(0, 10.5))
+
+volcano_caf_tan_lfc_1
+```
+
+## Heatmap (A)
+
+Global Expression pattern of DEGS with a LFC cutoff of 1 (i.e at least a fold change of 2), and padj < 0.05 in CAF vs. TAN. 328 (actually 363) genes, thus gene labels have been omitted from the rows.  
+
+```{R, message=F, warning=F, fig.height=12, fig.width=10}
+master <- rbind(up,down)
+#write.table(file = "/home/kevin/Documents/PhD/rna_seq_bc/report/de_genes_bc_gene_level.txt",master)
+# change rownames of rld using convert_ensg_version_to_hgnc_df_rownames
+rld_hgnc <- convert_ensg_version_to_hgnc_df_rownames(rld)
+mat <- subset(rld_hgnc, rownames(rld_hgnc) %in% master$Gene)
+
+mat <- t(mat)
+mat <- scale(mat, center=T, scale=T)
+mat <- t(mat)
+
+# drop 4722
+#mat <- mat[,-23]
+
+# set up annotation dataframe
+ann <- data.frame(Cell_Type = c(samples$Condition))
+
+#ann <- data.frame(Cell_Type = c(samples$Condition),
+ #                 samples = c(rownames(samples)))
+
+#ann <- subset(ann, ann$samples != 4722)
+#ann <- subset(ann, select=-c(samples))
+
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Cell_Type = c("TAN" =  "red",
+                                                    "CAF" = "blue")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 12, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 12)),
+                          annotation_name_side = "right")
+
+# set up heatmap object
+hm1 <- Heatmap(mat,
+              col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")),
+              name = "Z-score",
+
+              #Row annotation configurations
+              cluster_rows=T,
+              show_row_dend=T,
+              row_title_side="right",
+              row_title_gp=gpar(fontsize=4),
+              show_row_names=FALSE,
+              row_names_side="right",
+
+              #Column annotation configuratiions
+              cluster_columns=T,
+              show_column_dend=T,
+              column_title="CAF vs. TAN DEG LFC > |1|",
+              #column_title_side="top",
+              column_title_gp=gpar(fontsize=15, fontface="bold"),
+              show_column_names = T,
+              column_names_gp = gpar(fontsize = 12, fontface="bold"),
+
+              #Dendrogram configurations: columns
+              clustering_distance_columns="euclidean",
+              clustering_method_columns="complete",
+              column_dend_height=unit(2,"cm"),
+
+              #Dendrogram configurations: rows
+              clustering_distance_rows="euclidean",
+              clustering_method_rows="complete",
+              row_dend_width=unit(2,"cm"),
+              row_dend_side = "left",
+              row_dend_reorder = TRUE,
+
+              #Splits
+              border=T,
+              row_km = 1,
+              column_km = 1,
+
+              #plot params
+              #width = unit(5, "inch"),
+              #height = unit(4, "inch"),
+              #height = unit(0.4, "cm")*nrow(mat),
+
+              #Annotations
+              top_annotation = ha_col)
+
+# plot heatmap
+draw(hm1, annotation_legend_side = "right", heatmap_legend_side="right")
+```
+
+## Heatmap (B)
+
+Global expression pattern of DEGs with a LFC of 2 (a fold change of 4 vs. normal) and padj < 0.05. 
+
+```{R, message=F, warning=F, fig.width=10, fig.height=12}
+# use strict cutoff for heatmaps (LFC 2)
+get_upregulated_hm <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange>=2)], rownames(df)[which(df$padj<=0.05)])
+
+  results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+get_downregulated_hm <- function(df){
+
+    key <- intersect(rownames(df)[which(df$log2FoldChange<=-2)], rownames(df)[which(df$padj<=0.05)])
+
+    results <- as.data.frame((df)[which(rownames(df) %in% key),])
+    return(results)
+}
+
+up_hm <- get_upregulated_hm(lfc_df)
+down_hm <- get_downregulated_hm(lfc_df)
+
+up_hm <- annotate_de_genes_ensembl_gene_id(up_hm)
+down_hm <- annotate_de_genes_ensembl_gene_id(down_hm)
+
+master <- rbind(up_hm,down_hm)
+
+mat <- subset(rld_hgnc, rownames(rld_hgnc) %in% master$Gene)
+
+mat <- t(mat)
+mat <- scale(mat, center=T, scale=T)
+mat <- t(mat)
+
+# drop 4722
+#mat <- mat[,-23]
+
+# set up annotation dataframe
+ann <- data.frame(Cell_Type = c(samples$Condition))
+
+#ann <- data.frame(Cell_Type = c(samples$Condition),
+ #                 samples = c(rownames(samples)))
+
+#ann <- subset(ann, ann$samples != 4722)
+#ann <- subset(ann, select=-c(samples))
+
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Cell_Type = c("TAN" =  "red",
+                                                    "CAF" = "blue")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 12, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 12)),
+                          annotation_name_side = "right")
+
+# set up heatmap object
+hm1 <- Heatmap(mat,
+              col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")),
+              name = "Z-score",
+
+              #Row annotation configurations
+              cluster_rows=T,
+              show_row_dend=T,
+              row_title_side="right",
+              row_names_gp = gpar(fontsize=8, fontface='bold'),
+              show_row_names=TRUE,
+              row_names_side="right",
+
+              #Column annotation configuratiions
+              cluster_columns=T,
+              show_column_dend=T,
+              column_title="CAF vs. TAN DEG LFC > |2|",
+              #column_title_side="top",
+              column_title_gp=gpar(fontsize=15, fontface="bold"),
+              show_column_names = T,
+              column_names_gp = gpar(fontsize = 12, fontface="bold"),
+
+              #Dendrogram configurations: columns
+              clustering_distance_columns="euclidean",
+              clustering_method_columns="complete",
+              column_dend_height=unit(2,"cm"),
+
+              #Dendrogram configurations: rows
+              clustering_distance_rows="euclidean",
+              clustering_method_rows="complete",
+              row_dend_width=unit(2,"cm"),
+              row_dend_side = "left",
+              row_dend_reorder = TRUE,
+
+              #Splits
+              border=T,
+              row_km = 1,
+              column_km = 1,
+
+              #plot params
+              #width = unit(5, "inch"),
+              #height = unit(4, "inch"),
+              #height = unit(0.35, "cm")*nrow(mat),
+
+              #Annotations
+              top_annotation = ha_col)
+
+# plot heatmap
+draw(hm1, annotation_legend_side = "right", heatmap_legend_side="right")
+
+```
+
+## Heatmap (C)
+
+Global expression pattern of DEGs with a LFC of 2 (a fold change of 4 vs. normal) and padj < 0.05, with wet lab genes validated by Domhnall highlighted. 
+
+Please note that `WT1` is no longer considered differentially expressed after applying more robust filtering methods to the analysis.
+
+```{R, message=F, warning=F, fig.height=12, fig.width=10}
+#master <- rbind(up,down)
+
+#mat <- subset(rld, rownames(rld) %in% master$Gene)
+
+#mat <- t(mat)
+#mat <- scale(mat, center=T, scale=T)
+#mat <- t(mat)
+
+
+myRows <- c("SLC7A2", "GPR37", "ADGRF5", "PCDH10")
+
+# Set stylings for row names and make our selected rows unique
+row_idx <- which(rownames(mat) %in% myRows)
+fontsizes <- rep(10, nrow(mat))
+fontsizes[row_idx] <- 12
+fontcolors <- rep('black', nrow(mat))
+fontcolors[row_idx] <- 'red'
+fontfaces <- rep('plain',nrow(mat))
+fontfaces[row_idx] <- 'bold'
+
+# Create text annotation object for displaying row names
+rowAnno <- rowAnnotation(rows = anno_text(rownames(mat), gp = gpar(fontsize = fontsizes, fontface = fontfaces, col = fontcolors)))
+
+# Create our own row dendrogram (ComplexHeatmap orders rows by mean by default)
+dend <- reorder(as.dendrogram(hclust(dist(mat))), -rowMeans(mat), agglo.FUN = mean)
+
+# Find rows in dendrogram
+dend_idx <- which(order.dendrogram(dend) %in% which(rownames(mat) %in% myRows))
+
+# Find bottom and top of each row on heatmap (x and y axes go from 0 to 1)
+btm <- 1 - (dend_idx / nrow(mat))
+top <- btm + (1/nrow(mat))
+
+# set up annotation dataframe
+ann <- data.frame(Cell_Type = c(samples$Condition))
+
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Cell_Type = c("TAN" =  "red",
+                                                    "CAF" = "blue")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 12, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 12)),
+                          annotation_name_side = "left")
+
+Heatmap(mat, name = "Zscore", cluster_rows = dend, right_annotation = rowAnno, show_row_names = FALSE, top_annotation = ha_col,
+        col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")), show_column_names = T,
+              column_names_gp = gpar(fontsize = 12, fontface="bold"), border = T, row_dend_width=unit(2,"cm"), column_dend_height = unit(2,"cm"))
+
+box_col <- 'black'
+box_width <- 2
+decorate_heatmap_body("Zscore", { for (i in 1:length(myRows)) {
+  grid.lines(c(0, 1), c(top[i],top[i]), gp = gpar(lty = 1, lwd = box_width, col = box_col))
+  grid.lines(c(0, 1), c(btm[i],btm[i]), gp = gpar(lty = 1, lwd = box_width, col = box_col))
+  grid.lines(c(0, 0), c(btm[i],top[i]), gp = gpar(lty = 1, lwd = box_width, col = box_col))
+  grid.lines(c(1, 1), c(btm[i],top[i]), gp = gpar(lty = 1, lwd = box_width, col = box_col))
+}
+})
+```
+
+# Pathway Analysis {.tabset}
+
+```{R, message=F, warning=F}
+master_lfc1 <- rbind(up,down)
+
+# convert rownames of lfc_df from ensembl_gene_id_version to hgnc
+lfc_df_hgnc <- convert_ensg_version_to_hgnc_df_rownames(lfc_df)
+
+# want to create 'background' gene set entrez id + LFC values for all genes
+info <- getBM(attributes = c("hgnc_symbol", "entrezgene_id"),
+              mart=mart, filters = "hgnc_symbol", values = rownames(lfc_df_hgnc))
+
+
+lfc_df_hgnc$Gene <- rownames(lfc_df_hgnc)
+tmp <- merge(info, lfc_df_hgnc, by.x="hgnc_symbol", by.y="Gene")
+
+background <- tmp$log2FoldChange
+names(background) <- tmp$hgnc_symbol
+background <- sort(background, decreasing = TRUE)
+
+# make sure you have all DEGs here (LFC > 1 and pval cutoff i.e maser_lfc1 genes)
+degtmp <- subset(tmp, tmp$hgnc_symbol %in% master_lfc1$Gene)
+deg <- degtmp$entrezgene_id
+deg <- na.omit(deg)
+# biological id translator
+deg.df <- bitr(deg, fromType = "ENTREZID",
+                toType = c("ENSEMBL", "SYMBOL"),
+                OrgDb = org.Hs.eg.db)
+```
+
+## Hallmarks {.tabset}
+
+```{R, message=F, warning=F}
+#hmarks <- read.gmt("~/Downloads/h.all.v7.4.symbols.gmt")
+hmarks <- read.gmt("https://data.broadinstitute.org/gsea-msigdb/msigdb/release/7.4/h.all.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=hmarks,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+
+DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+### Dot Plot
+
+```{R, message=F, warning=F, fig.height=5, fig.width=7}
+clusterProfiler::dotplot(egmt, title = "GSEA HALLMARKS", x="NES")
+```
+
+### Enrichment plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+for(i in 1:nrow(egmt_df)){
+  #p <- enrichplot::gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  #plot(p)
+}
+p
+#p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[1]], pvalue_table = T)
+```
+
+## GO Biological Processes {.tabset}
+
+```{R,message=F, warning=F}
+gobp <- read.gmt("https://data.broadinstitute.org/gsea-msigdb/msigdb/release/7.4/c5.go.bp.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=gobp,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+#egmt_df$Description <- gsub("GOBP_", "", egmt_df$Description)
+#egmt_df$ID <- gsub("GOBP_", "", egmt_df$ID)
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+
+DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+### Dot Plot
+
+```{R, message=F, warning=F, fig.height=10, fig.width=12}
+dotplot_biological_process <- clusterProfiler::dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=29, font.size = 5)
+#dotplot_biological_process
+clusterProfiler::dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=29, font.size = 5)
+clusterProfiler::dotplot(egmt, title = "GO BIOLOGICAL PROCESSES", x="NES", showCategory=20, font.size = 7)
+
+```
+
+### Enrichment Plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+for(i in 1:nrow(egmt_df)){
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  print(p)
+}
+```
+
+### Tree Plot
+
+```{R, warning=F, message=F, fig.width=14, fig.height=10}
+d <- godata('org.Hs.eg.db', ont="BP")
+ego2 <- pairwise_termsim(egmt, method = "JC", semData = d)
+tree <- treeplot(ego2, showCategory = 29, color = "pvalue", fontsize = 0, offset = 100, nCluster=7)
+plot(tree)
+```
+
+### Cluster 1 
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster1 <- subset(tree$data$label, tree$data$group == "cluster_1")
+
+cluster1 <- na.omit(cluster1)
+
+p <- cnetplot(egmt, showCategory = cluster1, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 2
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster2 <- subset(tree$data$label, tree$data$group == "cluster_2")
+
+cluster2 <- na.omit(cluster2)
+
+p <- cnetplot(egmt, showCategory = cluster2, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 3
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster3 <- subset(tree$data$label, tree$data$group == "cluster_3")
+
+cluster3 <- na.omit(cluster3)
+
+p <- cnetplot(egmt, showCategory = cluster3, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 4
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster4 <- subset(tree$data$label, tree$data$group == "cluster_4")
+
+cluster4 <- na.omit(cluster4)
+
+p <- cnetplot(egmt, showCategory = cluster4, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 5
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster5 <- subset(tree$data$label, tree$data$group == "cluster_5")
+
+cluster5 <- na.omit(cluster5)
+
+p <- cnetplot(egmt, showCategory = cluster5, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+min.value <- floor( min(p$data$color, na.rm = TRUE) )
+max.value <- ceiling( max(p$data$color, na.rm = TRUE) )
+p + scale_color_gradientn(name = "fold change",
+                       colours = c("blue", "grey", "red"),
+                       limits= c(min.value, max.value), 
+                       breaks=c(min.value , 0, max.value))
+```
+
+### Cluster 6
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster6 <- subset(tree$data$label, tree$data$group == "cluster_6")
+
+cluster6 <- na.omit(cluster6)
+
+p <- cnetplot(egmt, showCategory = cluster6, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
+```
+
+### Cluster 7
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster7 <- subset(tree$data$label, tree$data$group == "cluster_7")
+
+cluster7 <- na.omit(cluster7)
+
+p <- cnetplot(egmt, showCategory = cluster7, foldChange = background, circular=T, colorEdge=T, node_label = 'none', cex_label_category = 1, cex_label_gene=0.5, cex_gene = 0.75)
+
+p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
+```
+
+## GO Cellular Component {.tabset}
+
+```{R,message=F, warning=F}
+gocc <- read.gmt("https://data.broadinstitute.org/gsea-msigdb/msigdb/release/7.4/c5.go.cc.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=gocc,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+
+egmt_df$ID <- gsub("GOCC_", "", egmt_df$ID)
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+
+DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+### Dot Plot
+
+```{R, message=F, warning=F, fig.height=10, fig.width=10}
+clusterProfiler::dotplot(egmt, title = "GO CELLULAR COMPONENT", x="NES", showCategory=24)
+```
+
+### Enrichment Plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+for(i in 1:nrow(egmt_df)){
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  print(p)
+}
+```
+
+### Tree Plot
+
+```{R, warning=F, message=F, fig.width=14, fig.height=10}
+d <- godata('org.Hs.eg.db', ont="BP")
+ego2 <- pairwise_termsim(egmt, method = "JC", semData = d)
+tree <- treeplot(ego2, showCategory = 24, color = "pvalue", fontsize = 0, offset = 100, nCluster=5)
+plot(tree)
+```
+
+### Cluster 1
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster1 <- subset(tree$data$label, tree$data$group == "cluster_1")
+
+cluster1 <- na.omit(cluster1)
+
+p <- cnetplot(egmt, showCategory = cluster1, foldChange = background, circular=T, colorEdge=T, node_label = 'none', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 2
+
+Anchoring junction has been dropped due to a huge number of non-de genes, crowding the plot. 
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster2 <- subset(tree$data$label, tree$data$group == "cluster_2")
+
+cluster2 <- na.omit(cluster2)
+cluster2 <- cluster2[-2]
+
+p <- cnetplot(egmt, showCategory = cluster2, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
+```
+
+### Cluster 3
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster3 <- subset(tree$data$label, tree$data$group == "cluster_3")
+
+cluster3 <- na.omit(cluster3)
+
+p <- cnetplot(egmt, showCategory = cluster3, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+### Cluster 4
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster4 <- subset(tree$data$label, tree$data$group == "cluster_4")
+
+cluster4 <- na.omit(cluster4)
+
+p <- cnetplot(egmt, showCategory = cluster4, foldChange = background, circular=T, colorEdge=T, node_label = 'none', cex_label_category = 1, cex_label_gene=0.75)
+
+min.value <- floor( min(p$data$color, na.rm = TRUE) )
+max.value <- ceiling( max(p$data$color, na.rm = TRUE) )
+p + scale_color_gradientn(name = "fold change",
+                       colours = c("blue", "grey", "red"),
+                       limits= c(min.value, max.value), 
+                       breaks=c(min.value , 0, max.value))
+```
+
+### Cluster 5
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster5 <- subset(tree$data$label, tree$data$group == "cluster_5")
+
+cluster5 <- na.omit(cluster5)
+
+p <- cnetplot(egmt, showCategory = cluster5, foldChange = background, circular=T, colorEdge=T, node_label = 'gene', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+## GO Molecular Function {.tabset}
+
+```{R,message=F, warning=F}
+gomf <- read.gmt("https://data.broadinstitute.org/gsea-msigdb/msigdb/release/7.4/c5.go.mf.v7.4.symbols.gmt")
+
+egmt <- GSEA(background,
+             TERM2GENE=gomf,
+             pvalueCutoff = 0.1, 
+             pAdjustMethod = 'BH',
+             minGSSize = 1, 
+             maxGSSize = 1000,
+             by='fgsea',
+             seed=11384191)
+
+egmt_df <- egmt@result
+
+egmt_subs <- subset(egmt_df, select=c(Description, enrichmentScore, NES, pvalue, p.adjust, core_enrichment ))
+
+DT::datatable(egmt_subs, rownames = FALSE, options=list(scrollX=T))
+```
+
+### Dot Plot
+
+```{R, message=F, warning=F, fig.height=6, fig.width=8}
+clusterProfiler::dotplot(egmt, title = "GO MOLECULAR FUNCTION", x="NES", showCategory=8)
+```
+
+### Enrichment Plots
+
+```{R, message=F, warning=F, fig.width=10, fig.height=5}
+for(i in 1:nrow(egmt_df)){
+  p <- gseaplot2(egmt, geneSetID = i, title = egmt_df$Description[[i]], pvalue_table = T)
+  print(p)
+}
+```
+
+### Tree Plot
+
+```{R, warning=F, message=F, fig.width=14, fig.height=10}
+#d <- godata('org.Hs.eg.db', ont="BP")
+ego2 <- pairwise_termsim(egmt, method = "JC", semData = d)
+tree <- treeplot(ego2, showCategory = 8, color = "pvalue", fontsize = 0, offset = 100, nCluster=3)
+plot(tree)
+```
+
+### Cluster 1
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster1 <- subset(tree$data$label, tree$data$group == "cluster_1")
+
+cluster1 <- na.omit(cluster1)
+cluster1 <- cluster1[-1]
+p <- cnetplot(egmt, showCategory = cluster1, foldChange = background, circular=T, colorEdge=T, node_label = 'all', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
+```
+
+
+### Cluster 2
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster2 <- subset(tree$data$label, tree$data$group == "cluster_2")
+
+cluster2 <- na.omit(cluster2)
+
+p <- cnetplot(egmt, showCategory = cluster2, foldChange = background, circular=T, colorEdge=T, node_label = 'all', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("blue", "grey"), name = "Log2FoldChange")
+```
+
+
+### Cluster 3
+
+```{R, message=F, warning=F, fig.height=10, fig.width=15}
+cluster3 <- subset(tree$data$label, tree$data$group == "cluster_3")
+
+cluster3 <- na.omit(cluster3)
+
+p <- cnetplot(egmt, showCategory = cluster3, foldChange = background, circular=T, colorEdge=T, node_label = 'all', cex_label_category = 1, cex_label_gene=0.75)
+
+p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
+```
+
+### Comparison with other studies
+
+A set of 414 CAF-specific marker genes were proposed by Kazakova et al. Here we compare the sets of genes to the genes found to be DE here - Table2 from study
+
+```{r}
+kazakova_markers <- read.csv("/home/rstudio/Downloads/Table2.csv", skip = 3)
+kazakova_markers_breast_cancer <- kazakova_markers %>% dplyr::filter(BRCA == "1")
+kazakova_markers_genes <- kazakova_markers$Gene_name
+kazakova_markers_breast_cancer_genes <- kazakova_markers_breast_cancer$Gene_name
+```
+
+```{r}
+inhouse_up <- up$Gene[which(up$Gene != "")]
+length(inhouse_up)
+length(kazakova_markers_genes)
+inhouse_up[which(inhouse_up %in% kazakova_markers_genes)]
+inhouse_up[which(inhouse_up %in% kazakova_markers_breast_cancer_genes)]
+
+```
+
+```{r}
+# Load the package
+library(VennDiagram)
+
+# Define the sets of genes
+# Set1 <- c("gene1", "gene2", "gene3", "gene4", "gene5")
+# Set2 <- c("gene1", "gene2", "gene6", "gene7", "gene8", "gene3", "gene4", "gene5")
+# Set3 <- c("gene1", "gene2", "gene3", "gene9", "gene10")
+
+Inhouse_Up <- inhouse_up
+Kazakova_CAF_Up_PanCancer <- kazakova_markers_genes
+Kazakova_CAF_Up_Breast <- kazakova_markers_breast_cancer_genes
+# Create a list of gene sets
+geneSets <- list("Inhouse Up" = Inhouse_Up, "Kazakova CAF\nUp PanCancer" = Kazakova_CAF_Up_PanCancer, "Kazakova CAF Up Breast" = Kazakova_CAF_Up_Breast)
+
+# Create a Venn diagram
+venn.diagram(geneSets, 
+             filename = "/home/rstudio/Desktop/venn_diagram.png",
+             col = "transparent", fill = c("dodgerblue", "goldenrod1", "darkorange"),
+             alpha = 0.5, label.col = "black",
+             main = "Gene Set Venn Diagram",
+             cex.main = 1.5, fontfamily = "sans", output = TRUE)
+
+# Display the Venn diagram
+#grid.newpage()
+#img <- readPNG("venn_diagram.png")
+#grid.raster(img)
+```
+
+```{r}
+# Load the package
+library(VennDiagram)
+
+# Define the sets of genes
+# Set1 <- c("gene1", "gene2", "gene3", "gene4", "gene5")
+# Set2 <- c("gene1", "gene2", "gene6", "gene7", "gene8", "gene3", "gene4", "gene5")
+# Set3 <- c("gene1", "gene2", "gene3", "gene9", "gene10")
+
+Inhouse_Down <- down$Gene[which(down$Gene != "")]
+Kazakova_CAF_Up_PanCancer <- kazakova_markers_genes
+Kazakova_CAF_Up_Breast <- kazakova_markers_breast_cancer_genes
+# Create a list of gene sets
+geneSets <- list("Inhouse\nUpregulated\nCAF"= inhouse_up, "Inhouse\nDownregulated\nCAF" = Inhouse_Down, "Kazakova CAF\nUp PanCancer" = Kazakova_CAF_Up_PanCancer, "Kazakova CAF Up Breast" = Kazakova_CAF_Up_Breast)
+
+# Create a Venn diagram
+venn.diagram(geneSets, 
+             filename = "/home/rstudio/Desktop/venn_diagram_up_and_downreg_inhouse.png",
+             col = "transparent", fill = c("dodgerblue", "goldenrod1", "darkorange", "red"),
+             alpha = 0.5, label.col = "black",
+             main = "Gene Set Venn Diagram Downregulated InHouse",
+             cex.main = 1.5, fontfamily = "sans", output = TRUE)
+
+# Display the Venn diagram
+#grid.newpage()
+#img <- readPNG("venn_diagram.png")
+#grid.raster(img)
+```
+
+```{r}
+#install.packages("UpSetR")
+library(UpSetR)
+
+# Define the sets of genes
+Set1 <- c("gene1", "gene2", "gene3", "gene4", "gene5")
+Set2 <- c("gene1", "gene2", "gene6", "gene7", "gene8")
+Set3 <- c("gene1", "gene2", "gene3", "gene9", "gene10")
+Set4 <- c("gene1", "gene2", "gene11", "gene12", "gene13")
+
+# Create a list of gene sets
+geneSets <- list("Inhouse\nUpregulated CAF"= inhouse_up, "Inhouse Downregulated\nCAF" = Inhouse_Down, "Kazakova CAF\nUp Multiple Cancers" = Kazakova_CAF_Up_PanCancer, "Kazakova CAF Up Breast" = Kazakova_CAF_Up_Breast)
+# Convert the list to a matrix format
+#geneMatrix <- as.data.frame(do.call(cbind, geneSets))
+
+# Create an UpSet plot
+library(UpSetR)
+upset_plot <- UpSetR::upset(fromList(geneSets), order.by = "freq", #main.bar.color = "skyblue",
+      #matrix.color = "lightgray", 
+      number.angles = 30)
+
+# Display the UpSet plot
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/heatmap_caf_tan2.svg")
+draw(heatmap_caf_tan)
+dev.off()
+
+```
+
+
+```{r}
+#update.packages("ragg")
+#install.packages("svglite")
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.svg")
+plot(volcano_caf_tan_lfc_1)
+dev.off()
+#(filename = "/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.svg", plot = volcano_caf_tan_lfc_1, device = "svg")
+
+#ggplot2::ggsave(filename = "/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.png", plot = volcano_caf_tan_lfc_1, device = "png")
+
+```
+
+```{r}
+ggar_obj <- ggarrange(plotlist = myplots, nrow = 2, ncol = 2, common.legend = F)#, legend = "bottom")
+ggar_obj
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/dotplot_bp_caf_tan.svg")
+plot(dotplot_biological_process)
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/upset_plot_caf_tan.svg")
+upset_plot
+dev.off()
+#myplots <- list(heatmap_caf_tan, volcano_caf_tan_lfc_1, dotplot_biological_process, upset_plot)
+```
+
+```{r}
+upset_plot
+```
+
+
+

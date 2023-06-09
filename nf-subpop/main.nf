@@ -10,6 +10,7 @@ def checkPathParamList = [
 for (param in checkPathParamList) if (param) file(param, checkIfExists: true)
 
 process GENERATE_METADATA {
+    label 'main_docker'
     publishDir "$params.outdir/metadata", mode: 'copy'
     input:
     val(out_full)
@@ -26,6 +27,7 @@ process GENERATE_METADATA {
 }
 
 process GENERATE_TX2GENE {
+    label 'main_docker'
     publishDir "$params.outdir/tx2gene", mode: 'copy'
 
     input:
@@ -41,7 +43,36 @@ process GENERATE_TX2GENE {
 }
  //, mode: 'copy', overwrite = true
 
+process DE_INHOUSE{
+    label 'main_docker'
+    publishDir "$params.outdir/de_inhouse", mode: 'copy'
+
+    input:
+    path(metadata_inhouse) // ch_inhouse_metadata
+    path(tx2gene) // ch_tx2gene
+    path(software_versions) // ch_sw_versions_inhouse
+    val(basedir)
+    output:
+    path("CAF_vs_TAN_DE_analysis.html"), emit: ch_de_inhouse_out
+
+    shell:
+        script = "rmarkdown::render('CAF_vs_TAN_DE_analysis.Rmd',"
+        script += "params = list("
+        script += "versions = '\$PWD/${software_versions}', "
+        script += "inhouse_metadata = '\$PWD/${metadata_inhouse}', "
+        script += "tx2gene = '\$PWD/${tx2gene}', "
+        script += "method = 'nextflow', "
+        script += "basedir = '\$PWD/${basedir}'),"
+        script += ")"
+    """
+    cp -L ${projectDir}/bin/HLAtyping_pipeline.Rmd HLAtyping_pipeline.Rmd 
+    Rscript -e "${script}"
+    """
+
+}
+
 process HLATYPING_ADD_SAMPLENAME {
+    label 'main_docker'
     publishDir "$params.outdir/hla_calls", mode: 'copy'
     input:
     path(hlatyping_files) // ch_hlatyping
@@ -57,6 +88,7 @@ process HLATYPING_ADD_SAMPLENAME {
 }
 
 process MATCH_BY_PATIENT {
+    label 'main_docker'
     publishDir "$params.outdir/metadata_by_patient", mode: 'copy'
 
     input:
@@ -83,6 +115,7 @@ process MATCH_BY_PATIENT {
 }
 
 process QC {
+    label 'main_docker'
     publishDir "$params.outdir/qc"
     stageInMode 'copy'
     stageOutMode 'copy'
@@ -91,13 +124,14 @@ process QC {
     path(metadata) // ch_metadata
     path(tx2gene) // ch_tx2gene
     path(inhouse_metadata) // ch_inhouse_metadata
+    path(metadata_without_patient) // ch_metadata
     output:
     // TODO
-    path("out.txt"), emit: ch_qc_out
-    path("QC_pipeline.md")
-    path("QC_pipeline.html")
+    //path("out.txt"), emit: ch_qc_out
+    path("QC_pipeline.md"), optional: true
+    path("QC_pipeline.html"), optional: true
     path("metadata_outliers_removed_ensembl_gene_id_version.txt"), emit: ch_metadata_outliers_removed
-    //path("dds_remove_outliers_batch_corrected.Rds"), emit: ch_dds_remove_outliers_batch_corrected
+    path("dds_remove_outliers_batch_corrected.Rds"), emit: ch_dds_remove_outliers_batch_corrected
     //path("dds_not_corrected_remove_outliers_no_inhouse.Rds"), emit: ch_dds_not_corrected_no_inhouse
     //script:
     shell:
@@ -107,7 +141,8 @@ process QC {
         script += "tx2gene = '\$PWD/${tx2gene}', "
         script += "inhouse_metadata = '\$PWD/${inhouse_metadata}', "
         script += "method = 'nextflow', "
-        script += "out = 'out.txt'),"
+        script += "metadata_without_patient = '\$PWD/${metadata_without_patient}', "
+        script += "out = 'out.txt', output_dir = getwd())"
         script += ")"
     """
     cp -L ${projectDir}/bin/QC_pipeline.Rmd QC_pipeline.Rmd 
@@ -140,6 +175,7 @@ ch_basedir = Channel.of(params.basedir)
 ch_gtf = Channel.fromPath(params.gtf, checkIfExists: true)
 ch_hlatyping = Channel.fromPath( params.hlatyping_output ) 
 ch_inhouse_metadata = Channel.fromPath(params.inhouse_metadata, checkIfExists: true)
+ch_sw_versions_inhouse = Channel.fromPath(params.software_versions_inhouse, checkIfExists: true) // for DE_INHOUSE
 
 //ch_hlatyping_dir = Channel.fromPath(params.hlatyping_outdir)
 
@@ -197,6 +233,7 @@ MATCH_BY_PATIENT(
 QC(
     MATCH_BY_PATIENT.out.ch_metadata_with_patient,
     ch_tx2gene,
-    ch_inhouse_metadata
+    ch_inhouse_metadata,
+    ch_metadata
 )
 }

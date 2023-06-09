@@ -1,0 +1,1033 @@
+---
+title: "QC"
+output: 
+  github_document:
+     toc: true
+     toc_depth: 3
+params:
+  metadata: ""
+  tx2gene: ""
+  out: ""
+  method: ""
+  inhouse_metadata: ""
+  metadata_without_patient: ""
+  output_dir: ""
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+## bibliography: citations.bib  
+
+```{r message = F, warning=F}
+#library(here)
+library(biomaRt)
+library(tximeta)
+library(DESeq2)
+library(ggplot2)
+library(PCAtools)
+library(sva)
+library(RColorBrewer)
+library(stringr)
+library(AnnotationDbi)
+# library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+library(dplyr)
+```
+
+Converting the QC script into a version that can go into a Nextflow pipeline. Need to run from the command line, without hardcoding paths.
+This script carries out initial QC, including outlier removal and batch correction.
+
+## Convert command-line arguments to variables
+
+```{r}
+if (params$method == "nextflow") {
+  metadata_path <- params$metadata
+  print(paste("metadata file: ", metadata_path))
+  tx2gene_file <- params$tx2gene
+  print(paste("tx2gene file: ", tx2gene_file))
+  #out <- params$out
+  #print(paste("out file: ", out))
+  inhouse_metadata <- params$inhouse_metadata
+  metadata_original <- read.table(params$metadata_without_patient)
+  #} else if (method == "rstudio") {
+} else {
+  #metadata <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt"
+  metadata_path <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata_by_patient/metadata_with_patient.txt"
+  tx2gene_file <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+  out <- "out.txt"
+  inhouse_metadata <- "~/Documents/PhD/CAF_data/InHouse/reformat_samples.csv"
+  metadata_original <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt")
+}
+sub <- "rstudio"
+```
+
+#### Define functions
+
+```{r}
+filter_out_low_expressed <- function(dds){
+  library(DESeq2)
+  print(paste("no of genes before filtering...", nrow(dds)))
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+svaBatchCor <- function(dat, mmi, mm0,n.sv=NULL, svs.include = NULL){
+  library(sva)
+  dat <- as.matrix(dat)
+  Y <- t(dat)
+  if(is.null(n.sv)) n.sv <- num.sv(dat,mmi,method="leek")
+  o <- sva(dat,mmi,mm0,n.sv=n.sv)
+  if (is.null(svs.include)){
+    W <- o$sv
+  } else{
+    W <- o$sv[,svs.include]
+  }
+  alpha <- solve(t(W) %*% W) %*% t(W) %*% Y
+  o$corrected <- t(Y - W %*% alpha)
+  return(o)
+}
+```
+
+#### Read in data
+
+```{r}
+# if (params$method == "nextflow") {
+#   metadata_original <- read.table(metadata_path)
+# } else {
+# }
+
+inhouse_metadata_in <- read.csv(inhouse_metadata)
+colnames(inhouse_metadata_in)[1] <- "Sample"
+inhouse_metadata_in$Sample <- as.character(inhouse_metadata_in$Sample)
+metadata_original_inhouse <- metadata_original[metadata_original$Study == "InHouse",]
+metadata_original_inhouse$Sample <- as.character(rownames(metadata_original_inhouse))
+metadata_original_inhouse$directory <- gsub("kevin", sub, metadata_original_inhouse$directory)
+inhouse_metadata_combined <- full_join(inhouse_metadata_in, metadata_original_inhouse)
+# metadata file created with create_metadata.R
+#metadata <- read.table(file.path(metadata), row.names = 1, sep = "\t")
+metadata <- read.table(metadata_path, sep = "\t")
+colnames(metadata) <- metadata[1,]
+metadata <- metadata[-1,]
+metadata$directory <- gsub("kevin", sub, metadata$directory)
+
+#metadata_original$Patient <- 
+sample_without_hla_call <- rownames(metadata_original)[which(!rownames(metadata_original) %in% metadata$Sample)][1]
+sample_without_hla_call_line <- c(sample_without_hla_call, rep(NA, 8), metadata_original[sample_without_hla_call,])
+# get files from metadata directory
+#files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
+files <- file.path(metadata$directory, metadata$Samplenames_old, "quant.sf")
+# make coldata given information for tximeta
+coldata_subpop <- data.frame(files, names=metadata$Sample, Study = metadata$Study, 
+                      Subpopulation = metadata$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata$Tumor_JuxtaTumor,
+                      Patient = metadata$Patient,
+                      stringsAsFactors=FALSE)
+files_inhouse <- file.path(inhouse_metadata_combined$directory, inhouse_metadata_combined$Sample, "quant.sf")
+print("files_inhouse...")
+print(files_inhouse)
+
+print("sample...")
+print(inhouse_metadata_combined$Sample)
+print("study...")
+print(inhouse_metadata_combined$Study)
+
+coldata_inhouse <- data.frame(files = files_inhouse, names=inhouse_metadata_combined$Sample, Study = inhouse_metadata_combined$Study, 
+                      Subpopulation = inhouse_metadata_combined$Subpopulation, 
+                      Tumor_JuxtaTumor = inhouse_metadata_combined$Tumor_JuxtaTumor,
+                      Patient = inhouse_metadata_combined$Patient,
+                      stringsAsFactors=FALSE)
+coldata <- rbind.data.frame(coldata_subpop, coldata_inhouse)
+# tx2gene generated with generate_tx2gene_table.R or supplied
+tx2gene <- read.table(tx2gene_file, header = T)
+# read in quant.sf file for each sample
+se <- tximeta(coldata, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+dds <- DESeqDataSet(se, design = ~1)
+# carry out variance-stabilising transformation
+vsd <- vst(dds, blind = TRUE)
+```
+
+#### Exploratory data analysis - PCA
+
+##### PCA + clinical correlations all studies
+
+For consistency between the DESeq2 `plotPCA` function (which by default takes the 500 most variable genes) and the PCATools `pca` function, all genes were used when carrying out PCA.
+
+```{r PCA}
+pca_before_correction_subpop <- plotPCA(vsd, intgroup = c("Subpopulation"), ntop = nrow(vsd)) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Subpopulation")  +
+  ggtitle("Original data") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_before_correction_subpop
+
+pca_before_correction_study <- plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd)) +
+    #ggtitle("PCA using Ensembl gene ID version") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Study") +
+  ggtitle("Original data") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_before_correction_study
+
+pca_before_correction_tumor_juxtatumor <- plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd)) + 
+  ggtitle("Original data")
+
+pca_before_correction_patient <- plotPCA(vsd, intgroup = c("Patient"), ntop = nrow(vsd)) + 
+  ggtitle("Original data")
+pca_before_correction_patient
+```
+
+
+**Double-check this stuff - based on using hgnc symbols**
+
+There seems to be 4 groups of samples here: the samples at PC1 < -100 which look like outliers, the main group in the middle (-100 < PC1 < 50) and then 2 groups which separate on PC2. One of these groups comes completely from one batch (EGAD00001005744) which is purely tumour CAFs and the other is a mixture of our in-house samples and study EGAD00001006144. There is clear separation between the in-house samples and EGAD00001006144, so perhaps they could be called one cluster. The in-house samples underwent culturing in a medium to promote the growth of fibroblastic cells, whereas the EGAD00001006144 samples either underwent separation by sorting or spreading. It is possible that there are similarities in the conditions under which the samples were kept which altered their transcriptomic properties.
+
+We can see that there are 16 samples that explain much of the variation in PC1, meaning that they are quite different from the other samples. Let's have a look at the PCA loadings using the `biplot` from `PCATools`.
+
+It is important to note here that our interpretation of the PCA is subjective, and can change depending on the number of highly variable genes we consider when carrying out PCA.
+
+To run from console
+rmarkdown::render("file.Rmd", params = list(myName = "Martin"))
+To run from command line:
+Rscript -e "rmarkdown::render(\"file.Rmd\", params = list(myName = \"abcd\"))"
+
+
+```{r PCA on full dataset}
+vsd.mat <- assay(vsd)
+rownames(metadata) <- metadata$Sample
+metadata_pca <- coldata %>% dplyr::select(names, Study, Subpopulation, Patient, Tumor_JuxtaTumor)
+rownames(metadata_pca) <- metadata_pca$names
+metadata_pca <- metadata_pca %>% dplyr::select(-c(names))
+p <- pca(vsd.mat, metadata = metadata_pca)
+genes_base <- str_split_fixed(string = rownames(p$loadings), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+# keep ensg version of newnames is na or is duplicated
+newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+    rownames(p$loadings), newnames_original)
+rownames(p$loadings) <- newnames
+```
+
+
+```{r Biplot}
+biplot(p, showLoadings = T, lab = NULL)
+
+```
+
+TODO: figure out if I can add the bibliography here
+
+Look up these 3 genes, look at their role in CAFs - below is their Entrez gene summary from GeneCards. They weren't "high weight" in the initial version.
+
+* SPARCL1: "Predicted to enable calcium ion binding activity; collagen binding activity; and extracellular matrix binding activity. Predicted to be involved in anatomical structure development and regulation of synapse organization. Located in extracellular space. [provided by Alliance of Genome Resources, Apr 2022]"
+MMP14: "Proteins of the matrix metalloproteinase (MMP) family are involved in the breakdown of extracellular matrix in normal physiological processes, such as embryonic development, reproduction, and tissue remodeling, as well as in disease processes, such as arthritis and metastasis. Most MMP's are secreted as inactive proproteins which are activated when cleaved by extracellular proteinases. However, the protein encoded by this gene is a member of the membrane-type MMP (MT-MMP) subfamily; each member of this subfamily contains a potential transmembrane domain suggesting that these proteins are expressed at the cell surface rather than secreted. This protein activates MMP2 protein, and this activity may be involved in tumor invasion. [provided by RefSeq, Jul 2008]"
+CCND1: "The protein encoded by this gene belongs to the highly conserved cyclin family, whose members are characterized by a dramatic periodicity in protein abundance throughout the cell cycle. Cyclins function as regulators of CDK kinases. Different cyclins exhibit distinct expression and degradation patterns which contribute to the temporal coordination of each mitotic event. This cyclin forms a complex with and functions as a regulatory subunit of CDK4 or CDK6, whose activity is required for cell cycle G1/S transition. This protein has been shown to interact with tumor suppressor protein Rb and the expression of this gene is regulated positively by Rb. Mutations, amplification and overexpression of this gene, which alters cell cycle progression, are observed frequently in a variety of human cancers. [provided by RefSeq, Dec 2019]"
+
+* FOS
+  + Proto-oncogene, forms part of TF complex, regulators of cell proliferation, differentiation, transformation, apoptosis.
+* APOD
+  + Apolipoprotein D, encodes part of HDL
+  + Expression induced in quiescent/senescent fibroblasts [@Rassart2020], and so may inhibit cell growth
+  + Downregulated in CAFs in our initial CAF vs TAN DE analysis
+* TMEM176B
+  + A transmembrane protein
+  + Identified as LR8 in 1999 [@Lurton1999] and was proposed as a marker for fibroblasts and their subpopulations.
+  + It has recently been found to be important in the AKT/mTOR pathway, which is involved in cell proliferation (and hence can be implicated in cancer) [@Kang2021].
+* SELENOP XX
+  + Selenoprotein P
+  + Increased expression stops conversion of fibroblasts to myofibroblasts [@Short2017]
+* PLXDC1
+  + Plexin Domain Containing 1
+  + Involved in angiogenesis
+  + Cell surface receptor for Pigment Epithelium Derived Factor [@Cheng2014]
+* P4HB XX
+  + Protein disulfide isomerase
+  + Possible fibroblast marker [@Wetzig2013]
+* CHPF XX
+  + Chondroitin polymerising factor
+  + Alters the formation of chondroitin sulphate in breast cancer. Chondroitin sulphate forms "abnormal" chains in breast cancer [@Liao2021]
+* CEMIP
+  + Cell Migration Inducing Hyaluronidase 1
+  + WNT-related [@Dong2021]
+  + High expression associated with malignancy and increased CAF infiltration [@Dong2021]. Possible biomarker. Dong study looked at expression in tumour cells, here we can see that its expression seems to change between different groups of CAFs too.
+* TFPI2
+  + Tissue factor pathway inhibitor 2.
+  + Serine proteinase
+  + Tumour suppressor
+  + Inhibits plasmin, thereby inhibiting the activation of MMPs
+  + Increased expression of TFPI2 in cancer cells downregulates the expression of MMPs in CAFs (the opposite is the case too) [@Gaud2011].
+* GREM1
+  + Antagonist of BMP, playing a role in tissue differentiation.
+  + Expressed in basal cell carcinoma CAF myofibroblasts [@Kim2017].
+  + Expression of GREM1 derived from CAFs thought to promote cancer progression [@Ren2019].
+  + Found to be expressed in CAF cell lines but not in breast cancer cell lines [@Ren2019].
+  + Its expression in bulk tumour samples is correlated with the expression of CAF markers such as FAP [@Ren2019].
+  
+Quick test to see if my genes of interest are in the data...
+
+```{r}
+genes.interest <- c("WT1", "SLC7A2", "GPR37", "ADGRF5", "PCDH10")
+genes.interest2 <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+
+genes.interest %in% newnames
+genes.interest2 %in% newnames
+newnames_original[which(newnames_original == genes.interest[4])]
+```
+
+
+```{r}
+fibroblast_markers <- c("ACTA2", "VIM", "FAP")
+# CDH1 == E-cahedrin, CDH5 == VE-cahedrin
+non_fibroblast_markers <- c("EPCAM", "CDH5", "CDH1", "CALD1", "SMTN", "PTPRC", "PECAM1")
+
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl") #, host="uswest.ensembl.org")
+    info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = fibroblast_markers,
+                  mart = mart,
+                  useCache=FALSE)
+
+info_non_fibroblast <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = non_fibroblast_markers,
+                  mart = mart,
+                  useCache=FALSE)
+
+fibroblast_markers_ensembl <- unique (grep(paste(info$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+non_fibroblast_markers_ensembl <-  unique (grep(paste(info_non_fibroblast$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+
+metadata_subpop_dirs <- paste(unique(metadata$directory), "salmon.merged.gene_tpm.tsv", sep = "/")
+
+#tpm_data_salmon <-  lapply(FUN = read_tsv, X = metadata_subpop_dirs)# %>%                              # Store all files in list
+  #full_join 
+tpm_data_salmon <- list()
+tpm_data_salmon <- data.frame()
+
+tpm_data_salmon <- metadata_subpop_dirs %>%
+  map(read.table, header = T) %>%
+  purrr::reduce(inner_join, by = c("gene_name", "gene_id"))
+
+#plot(tpm_data_salmon[tpm_data_salmon$gene_name == "ACTA2", c(3:ncol(tpm_data_salmon))])
+#s
+
+colnames(tpm_data_salmon) <- gsub("\\.", "-", colnames(tpm_data_salmon))
+tpm_data_salmon_long <- pivot_longer(tpm_data_salmon, cols = c(3:ncol(tpm_data_salmon)), names_to = "Sample", values_to = "TPM") %>% full_join(metadata, by = "Sample") %>% drop_na(Subpopulation)
+
+fibroblast_markers_tpm <- tpm_data_salmon_long %>% dplyr::filter(gene_name %in% fibroblast_markers) %>% dplyr::select(-gene_id) #%>% pivot_longer(cols = c(2:ncol(.)))
+non_fibroblast_markers_tpm <- tpm_data_salmon_long %>% dplyr::filter(gene_name %in% non_fibroblast_markers) %>% dplyr::select(-gene_id) #%>% pivot_longer(cols = c(2:ncol(.)))
+fibroblast_markers_tpm_plot <- ggplot(fibroblast_markers_tpm, aes(x=gene_name, y=log(TPM), colour = `Subpopulation`)) + 
+  geom_jitter(position=position_jitter(0.2))+ 
+  ggtitle("Expression level of CAF markers")
+
+non_fibroblast_markers_tpm_plot <- ggplot(non_fibroblast_markers_tpm, aes(x=gene_name, y=log(TPM), colour = `Subpopulation`)) + 
+  geom_jitter(position=position_jitter(0.2)) + 
+  ggtitle("Expression level of non-CAF markers")
+tpm_table <- list()
+genes <- c()
+for (i in 1:length(non_fibroblast_markers)){
+  gene <- non_fibroblast_markers[i]
+  genes <- c(genes, gene)
+  tpm_range <- range(non_fibroblast_markers_tpm$value[which(non_fibroblast_markers_tpm$gene_name == gene)])
+  tpm_table[[i]] <- tpm_range
+}
+tpm_table <- data.frame(tpm_table)
+colnames(tpm_table) <- genes
+rownames(tpm_table) <- c("Min", "Max")
+library(xtable)
+print(xtable(tpm_table), include.rownames = TRUE)
+
+fibroblast_markers_tpm_plot
+non_fibroblast_markers_tpm_plot
+
+```
+
+
+
+## Clinical correlations
+
+```{r, include = FALSE, warning=FALSE}
+peigencor <- suppressWarnings(eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations before batch-effect removal',
+    cexMain = 1.3,
+    colFrame = 'white',
+    plotRsquared = TRUE))
+```
+
+```{r}
+peigencor
+```
+
+This demonstrates that there are batch effects that need to be removed.
+
+## Outlier removal
+
+```{r}
+rv <- rowVars(assay(vsd))
+pc <- prcomp(t(assay(vsd)[head(order(-rv),nrow(assay(vsd))),]))
+# -190 found by visual inspection
+# changed from -200 as the way I am handling genes has changed slightly - I have a different number of genes for the PCs have changed slightly.
+# the samples kept are all the same.
+# changed back to 200 20230516
+idx <- abs(pc$x[,1]) > 200
+print(paste("Number of samples being removed,", length(idx[which(idx == TRUE)]), sep = " "))
+patient_samples <- rownames(metadata)
+patient_samples <- patient_samples[!idx]
+# create new metadata file 
+metadata_reduced <- metadata[patient_samples,]
+#metadata_outfile <- paste("../intermediate_files/metadata_outliers_removed_ensembl_gene_id_version_", date, ".txt", sep = "")
+metadata_outfile <- "metadata_outliers_removed_ensembl_gene_id_version.txt"
+print(paste("writing reduced metadata file to ", metadata_outfile, sep = ""))
+write.table(metadata_reduced, file = metadata_outfile, sep = "\t", quote = F, row.names = T)
+```
+
+```{r}
+dds.remove.outliers <- dds[,!idx]
+vsd.remove.outliers <- vst(dds.remove.outliers, blind = TRUE)
+#vsd.ensg.remove.outliers.mat <- assay(vsd.ensg.remove.outliers)
+```
+
+```{r PCA outliers removed ensg}
+plotPCA(vsd.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers)) + 
+    ggtitle("PCA outliers removed")
+
+plotPCA(vsd.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.remove.outliers)) +
+    ggtitle("PCA outliers removed")
+
+plotPCA(vsd.remove.outliers, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.remove.outliers)) + 
+  ggtitle("PCA outliers removed")
+
+plotPCA(vsd.remove.outliers, intgroup = c("Patient"), ntop = nrow(vsd.remove.outliers)) + 
+  ggtitle("PCA outliers removed")
+
+obj <- plotPCA(vsd.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers))
+obj + labs(color = "Subpopulation")
+```
+
+```{r PCA outliers removed for mini viv report}
+pca_before_batch_correction_subpop <- plotPCA(vsd.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers)) + 
+    ggtitle("PCA outliers removed\n before batch-effect removal") +  labs(color = "Subpopulation")
+
+pca_before_batch_correction_study <- plotPCA(vsd.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.remove.outliers)) +
+    ggtitle("PCA outliers removed") + labs(color = "Subpopulation")
+
+```
+
+## Batch Correction
+
+### TODO: should I remove differences due to patient of origin when doing batch correction?
+### Also
+
+```{r Combat-Seq Ensembl}
+# remove batch effects
+dds.remove.outliers.mat <- assay(dds.remove.outliers)
+outliers.removed.batch <- colData(dds.remove.outliers)$Study
+print(paste("Number of genes before filtering: ", nrow(dds.remove.outliers.mat), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+dds.remove.outliers.mat.filtered <- dds.remove.outliers.mat[apply(dds.remove.outliers.mat, 1, function(x) sum(x == 0)) < ncol(dds.remove.outliers.mat) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(dds.remove.outliers.mat.filtered), sep = ""))
+outliers.removed.group <- colData(dds.remove.outliers)$Tumor_JuxtaTumor
+print("batch correcting...")
+ptm <- proc.time()
+dds.remove.outliers.mat.batch.corrected <- ComBat_seq(counts = dds.remove.outliers.mat.filtered, batch = outliers.removed.batch, group = outliers.removed.group, full_mod = TRUE)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+#dds.remove.outliers.mat.batch.corrected
+# for some reason started to get the na values due to too large numbers error here, correcting by dividing everything by 4 20230517
+dds.remove.outliers.batch.corrected <- DESeqDataSetFromMatrix(round(dds.remove.outliers.mat.batch.corrected/4), colData = colData(dds.remove.outliers), design = ~1)
+vsd.remove.outliers.batch.corrected <- vst(dds.remove.outliers.batch.corrected, blind = TRUE)
+```
+
+
+```{r PCA outliers removed batch corrected}
+pca_after_correction_subpopulation <- plotPCA(vsd.remove.outliers.batch.corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers.batch.corrected)) +
+     theme(panel.background = element_blank(),
+     axis.line = element_line(colour = "black")) + 
+     labs(colour = "Subpopulation")  + 
+     ggtitle("After batch-effect removal \n Subpopulation") +
+       theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) 
+
+pca_after_correction_subpopulation
+
+pca_after_correction_study <- plotPCA(vsd.remove.outliers.batch.corrected, intgroup = c("Study"), ntop = nrow(vsd.remove.outliers.batch.corrected)) +
+     theme(panel.background = element_blank(),
+     axis.line = element_line(colour = "black")) +
+     labs(colour = "Study")  +
+     ggtitle("After batch-effect removal \n Study") +
+     theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_after_correction_study
+
+plotPCA(vsd.remove.outliers.batch.corrected, intgroup = c("Tumour_JuxtaTumour"), ntop = nrow(vsd.remove.outliers.batch.corrected)) +
+ ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
+```
+
+### Perform hierarchical clustering and PCA on CAF subpopulation markers
+
+source: https://jokergoo.github.io/ComplexHeatmap-reference/book/more-examples.html?q=genes#add-more-information-for-gene-expression-matrix 
+
+#### WITHOUT INHOUSE, TOP 500 MOST VARIABLE GENES
+
+No In-House samples
+Top 500 most variable genes, hierarchical clustering
+Euclidean distance and complete linkage
+
+```{r}
+vsd.remove.outliers.batch.corrected$Tumor_JuxtaTumor <- gsub("tumor", "tumour", vsd.remove.outliers.batch.corrected$Tumor_JuxtaTumor)
+colnames(colData(vsd.remove.outliers.batch.corrected)) <- gsub("Tumor_JuxtaTumor", "Tumour_JuxtaTumour", colnames(colData(vsd.remove.outliers.batch.corrected)))
+vsd.remove.outliers.batch.corrected.remove.inhouse <- vsd.remove.outliers.batch.corrected[,which(vsd.remove.outliers.batch.corrected$Subpopulation != "Unknown")]
+topvargenes <- head(order(rowVars(assay(vsd.remove.outliers.batch.corrected.remove.inhouse)), decreasing = TRUE), 500)
+vsd.remove.outliers.batch.corrected.remove.inhouse.high.var <- vsd.remove.outliers.batch.corrected.remove.inhouse[topvargenes,]
+
+mat <- as.matrix(assay(vsd.remove.outliers.batch.corrected.remove.inhouse.high.var))
+# scale matrix
+# subtract column mean, divide scaled column by standard deviation
+#mat <- t(scale(mat, center=T, scale=T))
+mat <- scale(mat, center=T, scale=T)
+ann <- data.frame(Subpopulation = c(vsd.remove.outliers.batch.corrected.remove.inhouse.high.var$Subpopulation),
+                  Tumour_JuxtaTumour = c(vsd.remove.outliers.batch.corrected.remove.inhouse.high.var$Tumour_JuxtaTumour),
+                  Study = c(vsd.remove.outliers.batch.corrected.remove.inhouse.high.var$Study))
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Subpopulation = c("S1" =  "red", "S3" = "blue", "S4" = "yellow"),
+                                      Tumour_JuxtaTumour = c("tumour" = "purple", "juxtatumour" = "orange"),
+                                      Study = c("EGAD00001005744" = "black", "EGAD00001003808" = "green", "EGAD00001004810" = "pink", "EGAD00001006144" = "gold")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 12, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 12)),
+                          annotation_name_side = "right")
+
+# set up heatmap object
+hm1 <- Heatmap(mat,
+              col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")),
+              name = "Z-score",
+
+              #Row annotation configurations
+              cluster_rows=T,
+              show_row_dend=F,
+              row_title_side="right",
+              row_title_gp=gpar(fontsize=4),
+              show_row_names=FALSE,
+              #row_names_side="right",
+
+              #Column annotation configuratiions
+              cluster_columns=T,
+              show_column_dend=T,
+              column_title="Hierarchical clustering of batch-corrected data\nTop 500 most variable genes",
+              #column_title_side="top",
+              column_title_gp=gpar(fontsize=15, fontface="bold"),
+              show_column_names = F,
+              #column_names_gp = gpar(fontsize = 12, fontface="bold"),
+
+              #Dendrogram configurations: columns
+              clustering_distance_columns="euclidean",
+              clustering_method_columns="complete",
+              column_dend_height=unit(2,"cm"),
+
+              #Dendrogram configurations: rows
+              clustering_distance_rows="euclidean",
+              clustering_method_rows="complete",
+              row_dend_width=unit(2,"cm"),
+              row_dend_side = "left",
+              row_dend_reorder = TRUE,
+
+              #Splits
+              border=T,
+              row_km = 1,
+              column_km = 1,
+
+              #plot params
+              #width = unit(5, "inch"),
+              #height = unit(4, "inch"),
+              #height = unit(0.4, "cm")*nrow(mat),
+
+              #Annotations
+              top_annotation = ha_col)
+
+# plot heatmap
+draw(hm1, annotation_legend_side = "right", heatmap_legend_side="right")
+```
+
+#### WITH INHOUSE, TOP 500 MOST VARIABLE GENES
+
+```{r}
+topvargenes <- head(order(rowVars(assay(vsd.remove.outliers.batch.corrected)), decreasing = TRUE), 500)
+vsd.remove.outliers.batch.corrected.high.var <- vsd.remove.outliers.batch.corrected[topvargenes,]
+
+mat <- as.matrix(assay(vsd.remove.outliers.batch.corrected.high.var))
+# scale matrix
+# subtract column mean, divide scaled column by standard deviation
+#mat <- t(scale(mat, center=T, scale=T))
+mat <- scale(mat, center=T, scale=T)
+
+ann <- data.frame(Subpopulation = c(vsd.remove.outliers.batch.corrected.high.var$Subpopulation),
+                  Tumour_JuxtaTumour = c(vsd.remove.outliers.batch.corrected.high.var$Tumour_JuxtaTumour),
+                  Study = c(vsd.remove.outliers.batch.corrected.high.var$Study))
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Subpopulation = c("S1" =  "red", "S3" = "blue", "S4" = "yellow", "Unknown" = "grey"),
+                                      Tumour_JuxtaTumour = c("tumour" = "purple", "juxtatumour" = "orange"),
+                      Study = c("EGAD00001005744" = "black", "EGAD00001003808" = "green", "EGAD00001004810" = "pink", "EGAD00001006144" = "gold", "InHouse" = "grey")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 12, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 12)),
+                          annotation_name_side = "right")
+patient_labels <- vsd.remove.outliers.batch.corrected.high.var$Patient[which(vsd.remove.outliers.batch.corrected.high.var$Study == "InHouse")]
+patient_labels <- paste("Pat.", patient_labels, sep = " ")
+which_columns <- which(vsd.remove.outliers.batch.corrected.high.var$Study == "InHouse")
+ha = columnAnnotation(foo = anno_mark(at = which_columns, labels = patient_labels))
+
+# set up heatmap object
+hm2 <- Heatmap(mat,
+              col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")),
+              name = "Z-score",
+
+              #Row annotation configurations
+              cluster_rows=T,
+              show_row_dend=F,
+              row_title_side="right",
+              row_title_gp=gpar(fontsize=4),
+              show_row_names=FALSE,
+              #row_names_side="right",
+
+              #Column annotation configuratiions
+              cluster_columns=T,
+              show_column_dend=T,
+              column_title="Hierarchical clustering batch-corrected data\nTop 500 most variable genes",
+              #column_title_side="top",
+              column_title_gp=gpar(fontsize=15, fontface="bold"),
+              show_column_names = F,
+              #column_names_gp = gpar(fontsize = 12, fontface="bold"),
+
+              #Dendrogram configurations: columns
+              clustering_distance_columns="euclidean",
+              clustering_method_columns="complete",
+              column_dend_height=unit(2,"cm"),
+
+              #Dendrogram configurations: rows
+              clustering_distance_rows="euclidean",
+              clustering_method_rows="complete",
+              row_dend_width=unit(2,"cm"),
+              row_dend_side = "left",
+              row_dend_reorder = TRUE,
+
+              #Splits
+              border=T,
+              row_km = 1,
+              column_km = 1,
+
+              #plot params
+              #width = unit(5, "inch"),
+              #height = unit(4, "inch"),
+              #height = unit(0.4, "cm")*nrow(mat),
+
+              #Annotations
+              top_annotation = ha_col
+              #, bottom_annotation = ha
+              )
+
+# plot heatmap
+draw(hm2, annotation_legend_side = "right", heatmap_legend_side="right")
+```
+
+### Repeat for CAF subpopulation markers
+
+```{r}
+# FSP1 = ATL1
+# ITGB1 = CD29
+# CAV1
+
+hgnc_symbol <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB", "ATL1", "CAV1")
+common_name <- c("FAP", "CD29", "aSMA", "PDPN", "PDGFRB", "FSP1", "CAV1")
+#common_name <- c("FAP", "CD29", expression(paste(alpha, "SMA", sep = "")), "PDPN", expression(paste("PDGFR", beta, sep = "")), "FSP1", "CAV1")
+
+caf_subpop_markers <- cbind.data.frame(hgnc_symbol, common_name)
+info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id"),
+                  filters = c("hgnc_symbol"),
+                  values = caf_subpop_markers$hgnc_symbol,
+                  mart = mart,
+                  useCache=FALSE)
+caf_subpop_markers_ensembl_hgnc_combined <- inner_join(caf_subpop_markers, info)
+
+caf_subpop_markers_ensembl <- unique(grep(paste(caf_subpop_markers_ensembl_hgnc_combined$ensembl_gene_id,collapse="|"), rownames(dds), value=TRUE))
+stopifnot(length(caf_subpop_markers_ensembl) == length(caf_subpop_markers_ensembl_hgnc_combined$hgnc_symbol))
+#subset vsd object to genes of interest and relabel with common names
+vsd.remove.outliers.batch.corrected.caf.subpop.markers <- vsd.remove.outliers.batch.corrected[caf_subpop_markers_ensembl,]
+rownames(vsd.remove.outliers.batch.corrected.caf.subpop.markers) <- str_split_fixed(rownames(vsd.remove.outliers.batch.corrected.caf.subpop.markers), pattern = "\\.", n = 2)[,1]
+# replace ensg with hgnc
+rownames(vsd.remove.outliers.batch.corrected.caf.subpop.markers[caf_subpop_markers_ensembl_hgnc_combined$ensembl_gene_id]) <- caf_subpop_markers_ensembl_hgnc_combined$common_name
+```
+
+```{r}
+mat <- as.matrix(assay(vsd.remove.outliers.batch.corrected.caf.subpop.markers))
+# scale matrix
+# subtract column mean, divide scaled column by standard deviation
+#mat <- t(scale(mat, center=T, scale=T))
+mat <- scale(mat, center=T, scale=T)
+
+ann <- data.frame(Subpopulation = c(vsd.remove.outliers.batch.corrected.caf.subpop.markers$Subpopulation),
+                  Tumour_JuxtaTumour = c(vsd.remove.outliers.batch.corrected.caf.subpop.markers$Tumour_JuxtaTumour),
+                  Study = c(vsd.remove.outliers.batch.corrected.caf.subpop.markers$Study))
+
+set.seed(123)
+# set up heatmap column annotation
+ha_col = HeatmapAnnotation(df = ann,
+                           col = list(Subpopulation = c("S1" =  "red", "S3" = "blue", "S4" = "yellow", "Unknown" = "grey"),
+                                      Tumour_JuxtaTumour = c("tumour" = "purple", "juxtatumour" = "orange"),
+                      Study = c("EGAD00001005744" = "black", "EGAD00001003808" = "green", "EGAD00001004810" = "pink", "EGAD00001006144" = "gold", "InHouse" = "grey")),
+                           annotation_legend_param = list(title_gp = gpar(fontsize = 8, fontface = "bold"),
+                                                                          labels_gp = gpar(fontsize = 8)),
+                          annotation_name_side = "right", annotation_name_gp = gpar(fontsize=10, fontface = "bold"))
+patient_labels <- vsd.remove.outliers.batch.corrected.caf.subpop.markers$Patient[which(vsd.remove.outliers.batch.corrected.caf.subpop.markers$Study == "InHouse")]
+patient_labels <- paste("Pat.", patient_labels, sep = " ")
+which_columns <- which(vsd.remove.outliers.batch.corrected.caf.subpop.markers$Study == "InHouse")
+ha = columnAnnotation(foo = anno_mark(at = which_columns, labels = patient_labels))
+
+# set up heatmap object
+hm3 <- Heatmap(mat,
+              col= colorRamp2(c(-2,-1,0,2,4),c("green", "green2", "black", "red2", "red")),
+              heatmap_legend_param=list(at=c(-2,-1,0,2,4),color_bar="continuous",
+                                        legend_direction="vertical", legend_width=unit(5,"cm"),
+                                        title_position="topcenter", title_gp=gpar(fontsize=10, fontface="bold")),
+              name = "Z-score",
+
+              #Row annotation configurations
+              cluster_rows=T,
+              show_row_dend=T,
+              row_title_side="right",
+              row_title_gp=gpar(fontsize=2.5),
+              show_row_names=T,
+              #row_names_side="right",
+              row_names_gp = gpar(fontsize = 10, fontface = "italic"),
+              #Column annotation configuratiions
+              cluster_columns=T,
+              show_column_dend=T,
+              column_title="Hierarchical clustering of batch-corrected data\nCAF subpopulation markers",
+              #column_title_side="top",
+              column_title_gp=gpar(fontsize=15, fontface="bold"),
+              show_column_names = F,
+
+              #Dendrogram configurations: columns
+              clustering_distance_columns="euclidean",
+              clustering_method_columns="complete",
+              column_dend_height=unit(1.5,"cm"),
+
+              #Dendrogram configurations: rows
+              clustering_distance_rows="euclidean",
+              clustering_method_rows="complete",
+              row_dend_width=unit(1,"cm"),
+              row_dend_side = "left",
+              row_dend_reorder = TRUE,
+
+              #Splits
+              border=T,
+              row_km = 1,
+              column_km = 1,
+              #plot params
+              #width = unit(5, "inch"),
+              #height = unit(4, "inch"),
+              #height = unit(0.4, "cm")*nrow(mat),
+              
+              #Annotations
+              top_annotation = ha_col
+              #, bottom_annotation = ha
+              )
+
+svg("~/Documents/PhD/notes/mini_viva_report/images/current_research/heatmap_cluster_caf_subpop_genes.svg", width = 10, height = 4)
+#png("~/Documents/PhD/notes/mini_viva_report/images/current_research/heatmap_cluster_caf_subpop_genes.png", width = 1000, height = 400, res = 200)
+
+draw(hm3, annotation_legend_side = "right", heatmap_legend_side="right")
+dev.off()
+```
+
+```{r}
+hm1
+```
+
+```{r}
+hm2
+```
+
+```{r Write to file}
+date <- Sys.Date()
+ #outfile.batch.corrected <- paste("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_", date, ".Rds", sep = "") -->
+outfile.batch.corrected <- "/home/rstudio/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/dds_remove_outliers_batch_corrected_20230516_ensg_tx2gene_gtf.Rds"
+print(paste("writing batch corrected data to ", outfile.batch.corrected, sep = ""))
+saveRDS(dds.remove.outliers.batch.corrected, file = outfile.batch.corrected)
+```
+
+### Surrogate variable analysis 
+
+#### SVA seems to remove biological signal 
+
+Is surrogate variable analysis required on the batch-corrected data? Does it remove the biological signal completely? -->
+
+Source of this code: https://www.bioconductor.org/packages/devel/workflows/vignettes/rnaseqGene/inst/doc/rnaseqGene.html  -->
+
+```{r} 
+keep <- which(colData(dds.remove.outliers.batch.corrected)$Subpopulation != "Unknown")
+dds.remove.outliers.batch.corrected.no.inhouse <- dds.remove.outliers.batch.corrected[,keep]
+```
+
+```{r extract normalised counts and remove genes with low counts ENSG}
+dds.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.remove.outliers.batch.corrected.no.inhouse)
+counts.remove.outliers.batch.corrected.no.inhouse  <- counts(dds.remove.outliers.batch.corrected.no.inhouse, normalized = TRUE)
+idx  <- rowMeans(counts.remove.outliers.batch.corrected.no.inhouse) > 1 
+counts.remove.outliers.batch.corrected.no.inhouse  <- counts.remove.outliers.batch.corrected.no.inhouse[idx, ]
+```
+
+```{r}
+plotPCA(vst(dds.remove.outliers.batch.corrected.no.inhouse), ntop = nrow(dds.remove.outliers.batch.corrected.no.inhouse), intgroup = "Subpopulation")
+```
+
+```{r surrogate variable analysis}
+mod <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds.remove.outliers.batch.corrected.no.inhouse))
+mod0 <- model.matrix(~ 1, colData(dds.remove.outliers.batch.corrected.no.inhouse))
+svseq_no_inhouse <- svaseq(counts.remove.outliers.batch.corrected.no.inhouse, mod, mod0) # use number of surrogate variables determined by the package, number is 22 -> it is 21 now..., possibly because of change in handling of genes again. --> now it is 20, 20230517
+```
+
+
+```{r Add surrogate variables to model matrix and make categorical variables factors}
+colData(dds.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.remove.outliers.batch.corrected.no.inhouse)$Subpopulation <- as.factor(colData(dds.remove.outliers.batch.corrected.no.inhouse)$Subpopulation)
+
+sv_names <- paste("SV", seq(1,svseq_no_inhouse$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+   colData(dds.remove.outliers.batch.corrected.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse$sv[,i]
+}
+
+```
+
+```{r Assign design formula}
+design(dds.remove.outliers.batch.corrected.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 +SV19 + SV20 + Subpopulation
+```
+
+```{r Do these surrogate variables account for lots of the variation in the data?}
+vst.dds.remove.outliers.batch.corrected.no.inhouse <- vst(dds.remove.outliers.batch.corrected.no.inhouse)
+```
+
+```{r Remove SVs to see if biological variation remains after removal}
+counts.remove.outliers.batch.corrected.no.inhouse.remove.svs <- svaBatchCor(counts.remove.outliers.batch.corrected.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 20)$corrected
+pca.metadata <- colData(dds.remove.outliers.batch.corrected.no.inhouse)[,1:4]
+# how to do VST outside deseq2? counts are not in a DEseq2 object
+pca.counts.remove.outliers.batch.corrected.no.inhouse.remove.svs <- pca(counts.remove.outliers.batch.corrected.no.inhouse.remove.svs, metadata = pca.metadata)
+```
+
+```{r}
+PCAtools::biplot(pca.counts.remove.outliers.batch.corrected.no.inhouse.remove.svs, lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nbatch-corrected data with surrogate variables\nremoved")
+```
+
+```{r}
+eigencorplot(pca.counts.remove.outliers.batch.corrected.no.inhouse.remove.svs, metavars = c('Subpopulation', 'Tumor_JuxtaTumor', 'Study'),
+              main = "Correlation between PCs and variables of interest\nafter batch correction with Combat-Seq\nand removal of surrogate variables", cexMain = 1.5)
+```
+
+ From the above we can see that when we include surrogate variables, we lose much of our biological , and the main difference is between study again - not what we want! -->
+
+
+#### What if we do SVA on the non batch-corrected data? -->
+
+```{r}
+keep <- which(colData(dds.remove.outliers)$Subpopulation != "Unknown")
+dds.remove.outliers.no.inhouse <- dds.remove.outliers[,keep]
+dds.remove.outliers.no.inhouse <- DESeq(dds.remove.outliers.no.inhouse)
+ # write to file -->
+outfile.no.inhouse <- "/home/rstudio/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/dds_not_corrected_remove_outliers_no_inhouse_20230517_tx2gene_gtf.Rds"
+saveRDS(dds.remove.outliers.no.inhouse, file = outfile.no.inhouse)
+counts.remove.outliers.batch.no.inhouse  <- counts(dds.remove.outliers.no.inhouse, normalized = TRUE)
+idx  <- rowMeans(counts.remove.outliers.batch.no.inhouse) > 1
+counts.remove.outliers.batch.no.inhouse  <- counts.remove.outliers.batch.no.inhouse[idx, ]
+```
+
+```{r surrogate variable analysis non batch corrected}
+mod <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds.remove.outliers.no.inhouse))
+mod0 <- model.matrix(~ 1, colData(dds.remove.outliers.no.inhouse))
+svseq_no_inhouse_non_corrected <- svaseq(counts.remove.outliers.batch.no.inhouse, mod, mod0) # use number of surrogate variables determined by the package, number is 21 -->
+
+colData(dds.remove.outliers.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.remove.outliers.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.remove.outliers.no.inhouse)$Subpopulation <- as.factor(colData(dds.remove.outliers.no.inhouse)$Subpopulation)
+
+sv_names <- paste("SV", seq(1,svseq_no_inhouse_non_corrected$n.sv), sep = "") 
+for (i in 1:length(sv_names)){
+colData(dds.remove.outliers.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse$sv[,i] 
+ } 
+
+design(dds.remove.outliers.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 +SV19 + SV20 + Subpopulation
+
+counts.remove.outliers.no.inhouse.remove.svs <- svaBatchCor(counts.remove.outliers.batch.no.inhouse, mmi = mod, mm0 = mod0, n.sv = 1)$corrected 
+pca.metadata <- colData(dds.remove.outliers.no.inhouse)[,1:4]
+ # how to do VST outside deseq2? counts are not in a DEseq2 object 
+pca.counts.remove.outliers.no.inhouse.remove.svs <- pca(counts.remove.outliers.no.inhouse.remove.svs, metadata = pca.metadata) 
+```
+
+```{r}
+PCAtools::biplot(pca.counts.remove.outliers.no.inhouse.remove.svs, lab = NULL, colby = "Study", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved")
+```
+
+```{r warning=F}
+counts.remove.outliers.no.inhouse.remove.svs.list <- list() 
+counts.remove.outliers.no.inhouse.remove.svs.list.log2.plus.1 <- list()
+pca.metadata <- colData(dds.remove.outliers.no.inhouse)[,1:4]
+pca.counts.remove.outliers.no.inhouse.remove.svs.list <- list()
+eigencorplots <- list()
+ for (i in 1:20){ 
+   sva.output <- svaBatchCor(counts.remove.outliers.batch.no.inhouse, mmi = mod, mm0 = mod0, n.sv = i)$corrected 
+   counts.remove.outliers.no.inhouse.remove.svs.list[[i]] <- sva.output 
+   sva.output.log2.plus.1 <- log2(sva.output + 1) 
+   sva.output.log2.plus.1 <- sva.output.log2.plus.1[complete.cases(sva.output.log2.plus.1),] 
+   counts.remove.outliers.no.inhouse.remove.svs.list.log2.plus.1[[i]] <- sva.output.log2.plus.1
+   pca.out <- pca(sva.output.log2.plus.1, metadata = pca.metadata) 
+   pca.counts.remove.outliers.no.inhouse.remove.svs.list[[i]] <- pca.out 
+   clinical.correlations <- eigencorplot(pca.out, metavars = colnames(pca.out$metadata), main = paste("n.sv:", i)) 
+   eigencorplots[[i]] <- clinical.correlations 
+ } 
+```
+```{r}
+eigencorplots
+```
+
+Starting at 1 surrogate variable, the resulting eigencorplot resulting from adding 1 surrogate variable was examined. The first one without a significant correlation between PC1 and study was n.sv = 11. (was n.sv = 9 and 8 with previous approach).
+
+ ### nb double check this!!
+
+```{r} 
+ eigencorplots[[11]] 
+``` 
+
+We can see from the PCA plot that when we include 8 surrogate variables, we get some separation by subpopulation, and good mixing between the studies. It should also be noted that a small percentage of the variation is being explained by PCs 1 and 2 (6 and 6%). 
+
+```{r} 
+PCAtools::biplot(pca.counts.remove.outliers.no.inhouse.remove.svs.list[[11]], lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved, n.sv = 11")
+
+PCAtools::biplot(pca.counts.remove.outliers.no.inhouse.remove.svs.list[[11]], lab = NULL, colby = "Study", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nnon batch-corrected with surrogate variables\nremoved, n.sv = 11") 
+``` 
+
+```{r}
+pca_after_correction_subpopulation
+pca_after_correction_study
+peigencor
+```
+
+```{r PCA outliers removed for mini viv report}
+#pca_before_batch_correction_subpop <- plotPCA(vsd.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers)) + 
+#    ggtitle("Before batch correction \n Subpopulation") +  labs(color = "Subpopulation")
+
+#pca_before_batch_correction_study <- plotPCA(vsd.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.remove.outliers)) +
+#    ggtitle("PCA outliers removed") + labs(color = "Subpopulation")
+
+pca_before_batch_correction_study <- plotPCA(vsd.remove.outliers, intgroup = c("Study"), ntop = nrow(vsd.remove.outliers)) +
+     theme(panel.background = element_blank(),
+     axis.line = element_line(colour = "black")) +
+     labs(colour = "Study")  +
+     ggtitle("Before batch-effect removal \n Study") +
+     theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_before_batch_correction_subpop <- plotPCA(vsd.remove.outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd.remove.outliers)) +
+ theme(panel.background = element_blank(),
+     axis.line = element_line(colour = "black")) +
+     #labs(colour = "Subpopulation")  +
+  labs(colour = "Subpopulation")  +
+      #geom_point(aes(shape=Subpopulation)) +
+     ggtitle("Before batch-effect removal \n Subpopulation") +
+     theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+```
+
+
+```{r}
+# Extract the data from the ggplot object
+pca_data <- layer_data(pca_before_batch_correction_subpop, 1)
+
+# Modify the shape column of the data frame
+pca_data$shape <- 2
+
+#layer_data(pca_before_batch_correction_subpop, 1) <- pca_data
+# Recreate the plot with the modified data
+
+pca_data$PC1 <- pca_before_batch_correction_subpop$data$PC1
+pca_data$PC2 <- pca_before_batch_correction_subpop$data$PC2
+
+# Print the modified plot
+```
+
+
+```{r}
+library(ggpubr)
+plotsbystudy <- ggarrange(plotlist = list(pca_before_batch_correction_study, pca_after_correction_study), nrow = 1, ncol = 2, common.legend = TRUE)
+plotsbysubpop <- ggarrange(plotlist = list(pca_before_batch_correction_subpop, pca_after_correction_subpopulation), nrow = 1, ncol = 2, common.legend = TRUE, legend = "bottom")
+plotsbystudy
+plotsbysubpop
+```
+
+```{r}
+pca_combined <- ggarrange(plotlist = list(plotsbystudy, plotsbysubpop), nrow = 2, ncol = 1)
+pca_combined
+
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure2/pca_combined.svg", width = 10)
+plot(pca_combined)
+dev.off()
+```
+
+
+```{r}
+hm2
+hm3
+```
+
+```{r}
+#png("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure2/heatmap_500_genes.png", res = 100, width = 1000, height = 1000)
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure2/heatmap_500_genes.svg", width = 10)
+hm2
+dev.off()
+```
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure2/heatmap_subpop_markers.svg", width = 10)
+hm3
+dev.off()
+```
+
+
+```{r}
+svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure2/eigencorplot.svg", width = 10)
+peigencor
+dev.off()
+```
+
