@@ -1,0 +1,479 @@
+---
+title: "CAF compare GTEx"
+author: "Kevin Ryan"
+date: "2023-06-16"
+output: html_document
+params:
+  metadata: ""
+  tx2gene: ""
+  out: ""
+  method: ""
+  inhouse_metadata: ""
+  metadata_without_patient: ""
+  output_dir: ""
+  gtex: ""
+  gtex_sample_attributes: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Compare CAFs and TANs with GTEx fibroblasts
+
+1. read in counts in-house
+2. read in counts gtex
+3. match by genes
+4. make into one deseq object
+5. batch correction combat-seq
+6. PCA
+
+### Load libraries
+
+```{r}
+library(tximeta)
+library(DESeq2)
+library(vroom)
+library(sva)
+library(dplyr)
+library(stringr)
+```
+
+### Convert command-line arguments to variables
+
+```{r}
+if (params$method == "nextflow") {
+  metadata_path <- params$metadata
+  print(paste("metadata file: ", metadata_path))
+  tx2gene_file <- params$tx2gene
+  print(paste("tx2gene file: ", tx2gene_file))
+  #out <- params$out
+  #print(paste("out file: ", out))
+  inhouse_metadata <- params$inhouse_metadata
+  metadata_original <- read.table(params$metadata_without_patient)
+  gtex_file <- params$gtex
+  #} else if (method == "rstudio") {
+} else {
+  #metadata <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt"
+  metadata_path <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata_by_patient/metadata_with_patient.txt"
+  tx2gene_file <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+  out <- "out.txt"
+  inhouse_metadata <- "~/Documents/PhD/rna_seq_bc/metadata/reformat_samples_extra_info.csv"
+  metadata_original <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt")
+  gtex_file <- "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/data/gene_reads_2017-06-05_v8_cells_cultured_fibroblasts.gct/gene_reads_cells_cultured_fibroblasts.gct"
+  gtex_subject_pheno <- "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/data/GTEx_Analysis_v8_Annotations_SubjectPhenotypesDS.txt"
+  gtex_sample_attributes <- "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/data/GTEx_Analysis_v8_Annotations_SampleAttributesDS.txt"
+  
+}
+sub <- "rstudio"
+```
+
+```{r define function}
+filter_out_low_expressed <- function(dds, deseq_obj = TRUE){
+  library(DESeq2)
+  print(paste("no of genes before filtering...", nrow(dds)))
+  if (deseq_obj == TRUE){
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  } else {
+    # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(dds) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(dds >= 10) >= X
+  dds <- dds[keep,]
+  }
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+```
+
+### Read in In-house data
+
+```{r}
+inhouse_metadata_in <- read.csv(inhouse_metadata)
+inhouse_metadata_in$SMNABTCH <- "InHouse"
+colnames(inhouse_metadata_in)[1] <- "Sample"
+inhouse_metadata_in$Sample <- as.character(inhouse_metadata_in$Sample)
+metadata_original_inhouse <- metadata_original[metadata_original$Study == "InHouse",]
+metadata_original_inhouse$Sample <- as.character(rownames(metadata_original_inhouse))
+metadata_original_inhouse$directory <- gsub("kevin", sub, metadata_original_inhouse$directory)
+inhouse_metadata_combined <- full_join(inhouse_metadata_in, metadata_original_inhouse)
+files_inhouse <- file.path(inhouse_metadata_combined$directory, inhouse_metadata_combined$Sample, "quant.sf")
+coldata_inhouse <- data.frame(files = files_inhouse, names=inhouse_metadata_combined$Sample, Study = inhouse_metadata_combined$Study, 
+                      Subpopulation = inhouse_metadata_combined$Subpopulation, 
+                      Tumor_JuxtaTumor = inhouse_metadata_combined$Tumor_JuxtaTumor,
+                      Patient = inhouse_metadata_combined$Patient,
+                      SMNABTCH = "InHouse",
+                      stringsAsFactors=FALSE)
+# tx2gene generated with generate_tx2gene_table.R or supplied
+tx2gene <- read.table(tx2gene_file, header = T)
+# read in quant.sf file for each sample
+se <- tximeta(coldata_inhouse, skipMeta=TRUE, txOut=FALSE, tx2gene=tx2gene)
+dds <- DESeqDataSet(se, design = ~1)
+dds <- filter_out_low_expressed(dds)
+inhouse_counts <- as.data.frame(assays(dds)$counts)
+inhouse_counts$Gene <- str_split_fixed(rownames(inhouse_counts), pattern = "\\.", n = 2)[,1]
+```
+
+### Read in GTEx data
+
+```{r}
+gtex_in <- vroom(gtex_file, skip = 2)
+gtex_in <- gtex_in %>% dplyr::select(-c(id, Description))
+gtex_in <- as.data.frame(gtex_in)
+rownames(gtex_in) <- gtex_in$Name
+gtex_in$Name <- NULL
+gtex_in <- filter_out_low_expressed(gtex_in, deseq_obj = F)
+gtex_in$Gene <- str_split_fixed(rownames(gtex_in), pattern = "\\.", n = 2)[,1]
+gtex_in[1:5,1:5]
+#dds_gtex <- DESeqDataSetFromMatrix(gtex_in)
+```
+
+### Match by genes
+
+#### first get median of duplicated ENSGs
+
+```{r}
+get_median_duplicated_genenames <- function(df){
+  n_occur <- data.frame(table(df$Gene))
+  dups <- df[df$Gene %in% n_occur$Var1[n_occur$Freq > 1],]
+  not_dups <- df[!(df$Gene %in% n_occur$Var1[n_occur$Freq > 1]),]
+  dups_summarise <- dups %>% group_by(Gene) %>% dplyr::summarise((across(where(is.numeric), median)))
+  df_not_dup <- rbind.data.frame(not_dups, dups_summarise)
+  return(df_not_dup)
+}
+inhouse_counts_not_dup <- get_median_duplicated_genenames(inhouse_counts)
+gtex_in_not_dup <- get_median_duplicated_genenames(gtex_in)
+```
+
+#### match by genes
+
+```{r}
+gtex_in_not_dup[1:5,1:5]
+gtex_fibroblast_subjid <- paste("GTEX", str_split_fixed(colnames(gtex_in_not_dup)[-ncol(gtex_in_not_dup)], pattern = "-", n = 5)[,2], sep = "-")
+gtex_fibroblast_subjid <- c(gtex_fibroblast_subjid, "Gene")
+colnames(gtex_in_not_dup) <- gtex_fibroblast_subjid
+gtex_in_not_dup_ord <- gtex_in_not_dup[,gtex_fibroblast_subjid]
+inhouse_gtex_join <- full_join(inhouse_counts_not_dup, gtex_in_not_dup_ord)
+rownames(inhouse_gtex_join) <- inhouse_gtex_join$Gene
+inhouse_gtex_join$Gene <- NULL
+#inhouse_gtex_join <- lapply(na.omit(inhouse_gtex_join), as.numeric)
+inhouse_gtex_join <- mutate_all(na.omit(inhouse_gtex_join), function(x) as.integer(as.character(x)))
+```
+
+#### read in gtex metadata subject level
+
+```{r}
+gtex_subject_pheno_in <- vroom(gtex_subject_pheno)
+gtex_subject_pheno_in <- data.frame(gtex_subject_pheno_in)
+gtex_fibroblast_subjid <- paste("GTEX", str_split_fixed(colnames(gtex_in)[-ncol(gtex_in)], pattern = "-", n = 5)[,2], sep = "-")
+rownames(gtex_subject_pheno_in) <- gtex_subject_pheno_in$SUBJID
+gtex_subject_pheno_in_ord <- gtex_subject_pheno_in[gtex_fibroblast_subjid,]
+colnames(gtex_subject_pheno_in_ord)[1] <- "names"
+gtex_subject_pheno_in_ord$Study <- "GTEX"
+y <- cut(inhouse_metadata_combined$Age, breaks = c(19,29,39,49,59,69,79,89), labels = c("20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89"))
+coldata_inhouse <- data.frame(names = inhouse_metadata_combined$Sample,
+                                    SEX = rep(2, length(inhouse_metadata_combined$Sample)), 
+                                    AGE = y,
+                                    Sample_Site = inhouse_metadata_combined$Tumor_JuxtaTumor,
+                                    Study = "InHouse",
+                              SMNABTCH = inhouse_metadata_combined$SMNABTCH)
+
+# get inhouse_gtex_join in correct order
+```
+
+#### read in gtex metadata sample level
+
+```{r}
+gtex_sample_pheno_in <- data.frame(vroom(gtex_sample_attributes))
+rownames(gtex_sample_pheno_in) <- gtex_sample_pheno_in$SAMPID
+gtex_sample_pheno_in_fibroblast <- gtex_sample_pheno_in[colnames(gtex_in)[-ncol(gtex_in)],]
+gtex_fibroblast_subjid2 <- paste("GTEX", str_split_fixed(rownames(gtex_sample_pheno_in_fibroblast), pattern = "-", n = 5)[,2], sep = "-")
+rownames(gtex_sample_pheno_in_fibroblast) <- gtex_fibroblast_subjid2
+# put in same order as subject-level metadata
+gtex_sample_pheno_in_fibroblast_ord <- gtex_sample_pheno_in_fibroblast[gtex_fibroblast_subjid,]
+gtex_sample_pheno_in_fibroblast_ord$SAMPID <- rownames(gtex_sample_pheno_in_fibroblast_ord)
+colnames(gtex_sample_pheno_in_fibroblast_ord)[1] <- "names"
+gtex_sample_pheno_in_fibroblast_ord <- gtex_sample_pheno_in_fibroblast_ord %>% dplyr::select(names, SMNABTCH)
+```
+
+#### combine the two
+
+```{r}
+gtex_sample_pheno_in_complete <- full_join(gtex_subject_pheno_in_ord, gtex_sample_pheno_in_fibroblast_ord, by = "names")
+```
+
+```{r}
+
+```
+
+#### make coldata
+
+```{r}
+coldata_gtex <- data.frame(names = gtex_subject_pheno_in_ord$names, 
+                           SEX = gtex_subject_pheno_in_ord$SEX,
+                           AGE =gtex_subject_pheno_in_ord$AGE,
+                           Sample_Site = "normal_tissue",
+                           Study = rep("GTEX", ncol(gtex_in)-1),
+                           SMNABTCH = gtex_sample_pheno_in_fibroblast_ord$SMNABTCH)
+
+coldata_inhouse_gtex <- rbind.data.frame(coldata_inhouse, coldata_gtex)
+coldata_inhouse_gtex[1:5,]
+coldata_inhouse_gtex$SEX <- gsub(1, "Male", coldata_inhouse_gtex$SEX)
+coldata_inhouse_gtex$SEX <- gsub(2, "Female", coldata_inhouse_gtex$SEX)
+coldata_inhouse_gtex$Under_50 <- coldata_inhouse_gtex$AGE
+coldata_inhouse_gtex$Under_50 <- fct_collapse(coldata_inhouse_gtex$Under_50, Less_50 = c("20-29","30-39","40-49"), Greater_equal_50 = c("50-59","60-69","70-79","80-89"))
+```
+
+```{r}
+#dissimilar_index <- function(dat) {
+#    ind = with(dat, (foo == bar) | (is.na(foo) & is.na(bar)))  
+#    which(is.na(ind) | !ind)
+#}
+#colnms_combined <- data.frame(foo = colnames(inhouse_gtex_join), bar = coldata_inhouse_gtex$names )
+#dissimilar_index(colnms_combined)
+dds_combined <- DESeqDataSetFromMatrix(countData = inhouse_gtex_join, colData = coldata_inhouse_gtex, design = ~1)
+# carry out variance-stabilising transformation
+vsd <- vst(dds_combined, blind = TRUE)
+```
+
+```{r}
+coldata_gtex_only <- coldata_gtex
+coldata_gtex_only$Under_50 <- as.factor(coldata_gtex_only$AGE)
+coldata_gtex_only$Under_50 <- fct_collapse(coldata_gtex_only$Under_50, Less_50 = c("20-29","30-39","40-49"), Greater_equal_50 = c("50-59","60-69","70-79","80-89"))
+coldata_gtex_only$SEX <- gsub(1, "Male", coldata_gtex_only$SEX)
+coldata_gtex_only$SEX <- gsub(2, "Female", coldata_gtex_only$SEX)
+dds_gtex_only <- DESeqDataSetFromMatrix(gtex_in_not_dup_ord[,-ncol(gtex_in_not_dup_ord)], colData = coldata_gtex_only, design = ~1)
+```
+
+```{r}
+pca_before_correction <- plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd)) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Study")  +
+  ggtitle("PCA biplot before batch correction") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+```
+
+```{r}
+pca_before_correction
+ggsave(pca_before_correction, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_original_by_study.png")
+```
+
+```{r plots gtex only}
+vsd.gtex <- vst(dds_gtex_only, blind = TRUE)
+pca.data.gtex <- plotPCA(vsd.gtex, intgroup = c("Sample_Site", "AGE", "SEX", "Under_50"), ntop = nrow(vsd.gtex), returnData = TRUE)
+percentVar <- round(100 * attr(pca.data.gtex, "percentVar"))
+ggplot(pca.data.gtex, aes(PC1, PC2,  colour=SEX)) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+```
+
+
+```{r}
+ggplot(pca.data.gtex, aes(PC1, PC2,  colour=Under_50)) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+```
+
+```{r}
+dds.mat <- assay(dds_combined)
+batch <- colData(dds_combined)$Study
+print(paste("Number of genes before filtering: ", nrow(dds.mat), sep = ""))
+# remove genes with 0 in > 1/3 of samples as per GitHub user benostendorf https://github.com/zhangyuqing/ComBat-seq/issues/20 
+dds.mat.filtered <- dds.mat[apply(dds.mat, 1, function(x) sum(x == 0)) < ncol(dds.mat) / 3, ]
+print(paste("Number of genes after filtering: ", nrow(dds.mat.filtered), sep = ""))
+group <- colData(dds_combined)$Sample_Site
+print("batch correcting...")
+ptm <- proc.time()
+dds.mat.batch.corrected <- ComBat_seq(counts = dds.mat.filtered, batch = batch, full_mod = FALSE, group=NULL)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+#dds.remove.outliers.mat.batch.corrected
+# for some reason started to get the na values due to too large numbers error here, correcting by dividing everything by 4 20230517
+dds.batch.corrected <- DESeqDataSetFromMatrix(round(dds.mat.batch.corrected/4), colData = colData(dds_combined), design = ~1)
+vsd.batch.corrected <- vst(dds.batch.corrected, blind = TRUE)
+```
+
+```{r}
+pca_after_correction <- plotPCA(vsd.batch.corrected, intgroup = c("Sample_Site"), ntop = nrow(vsd.batch.corrected)) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Sample Site")  +
+  ggtitle("After batch correction") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+pca_after_correction
+```
+
+```{r}
+data <- plotPCA(vsd.batch.corrected, intgroup = c("Sample_Site", "AGE", "SEX", "Under_50"), ntop = nrow(vsd.batch.corrected), returnData = TRUE)
+percentVar <- round(100 * attr(data, "percentVar"))
+ggplot(data, aes(PC1, PC2,  colour=SEX)) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+
+```
+
+```{r}
+ggplot(data, aes(PC1, PC2,  colour=AGE)) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+```
+
+```{r}
+library(PCAtools)
+p <- pca(assay(vsd.batch.corrected), metadata = colData(dds.batch.corrected))
+```
+
+```{r}
+peigencor <- suppressWarnings(eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(colData(dds.batch.corrected)),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations',
+    cexMain = 1.3,
+    colFrame = 'white',
+    plotRsquared = TRUE))
+```
+
+```{r}
+peigencor
+```
+
+<!-- Skin for Fibroblast Culture  -->
+
+<!-- ```{r} -->
+<!-- batchQC(inhouse_gtex_join, batch=coldata_inhouse_gtex$Study,  -->
+<!--         report_file="batchqc_report_gtex_fibroblast.html", report_dir=".",  -->
+<!--         report_option_binary="111111111", -->
+<!--         view_report=FALSE, interactive=TRUE, batchqc_output=TRUE) -->
+<!-- ``` -->
+
+### batch correction with SMNABTCH using limma::removebatcheffects
+
+```{r}
+library(limma)
+batch <- colData(dds_combined)$SMNABTCH
+design0 <- model.matrix(~colData(dds_combined)$AGE)
+vsd.batch.corrected <- vsd
+assay(vsd.batch.corrected) <- limma::removeBatchEffect(assay(vsd), batch = batch, design=design0)
+```
+
+```{r}
+data2 <- plotPCA(vsd.batch.corrected, intgroup = c("Sample_Site", "AGE", "SEX", "Under_50", "Study"), 
+                 ntop = nrow(vsd.batch.corrected), 
+                 returnData = TRUE)
+levels(data2$Sample_Site) <- c("normal_tissue", "juxtatumor", "tumor")
+percentVar <- round(100 * attr(data2, "percentVar"))
+plot_out <- ggplot(data2, aes(PC1, PC2,  Sample_Site, color = Sample_Site)) +
+                                #factor(Sample_Site, levels = c(2,1,0)))) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) #+
+  #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
+
+```
+
+```{r}
+plot_out
+```
+
+```{r}
+data3 <- data2[order(data2$Sample_Site),]
+data_norm <- data2 %>% dplyr::filter(Sample_Site == "normal_tissue")
+data_tumor <- data2 %>% dplyr::filter(Sample_Site == "tumor")
+# data_jt <- data2 %>% dplyr::filter(Sample_Site == "juxtatumor")
+data4 <- rbind.data.frame(data_norm, data_tumor, data_jt)
+plot_out <- ggplot(data4, aes(PC1, PC2, color = Sample_Site)) +
+                                #factor(Sample_Site, levels = c(2,1,0)))) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  ggtitle("PCA biplot batch-corrected\n Nucleic acid isolation batch limma")#+
+  #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
+plot_out
+```
+
+```{r}
+ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_nucleic_acid_isolation.png")
+```
+
+```{r}
+plot_bc_sex <- ggplot(data4, aes(PC1, PC2, color = SEX)) +
+                                #factor(Sample_Site, levels = c(2,1,0)))) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  ggtitle("PCA biplot batch-corrected\n Nucleic acid isolation batch limma\nby sex")#+
+  #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
+plot_bc_sex
+ggsave(plot_bc_sex, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_sex.png")
+
+plot_bc_age <- ggplot(data4, aes(PC1, PC2, color = Under_50)) +
+                                #factor(Sample_Site, levels = c(2,1,0)))) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  ggtitle("PCA biplot batch-corrected\n Nucleic acid isolation batch limma\nby age")#+
+  #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
+plot_bc_age
+ggsave(plot_bc_age, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_age.png")
+```
+
+```{r}
+batch2 <- colData(dds_combined)$Study
+design0 <- model.matrix(~colData(dds_combined)$AGE)
+vsd.batch.corrected2 <- vsd
+assay(vsd.batch.corrected2) <- limma::removeBatchEffect(assay(vsd), 
+                                                        batch = batch2, 
+                                                        design=design0)
+```
+
+```{r}
+data2 <- plotPCA(vsd.batch.corrected2, intgroup = c("Sample_Site", "AGE", "SEX", "Under_50", "Study"), 
+                 ntop = nrow(vsd.batch.corrected2), 
+                 returnData = TRUE)
+#levels(data2$Sample_Site) <- c("normal_tissue", "juxtatumor", "tumor")
+percentVar <- round(100 * attr(data2, "percentVar"))
+#data3 <- data2[order(data2$Sample_Site),]
+#data_norm <- data2 %>% dplyr::filter(Sample_Site == "normal_tissue")
+#data_tumor <- data2 %>% dplyr::filter(Sample_Site == "tumor")
+# data_jt <- data2 %>% dplyr::filter(Sample_Site == "juxtatumor")
+#data4 <- rbind.data.frame(data_norm, data_tumor, data_jt)
+plot_out <- ggplot(data2, aes(PC1, PC2, color = Sample_Site)) +
+                                #factor(Sample_Site, levels = c(2,1,0)))) +   
+  geom_point(size=3) +
+ xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  ggtitle("PCA biplot batch-corrected\n GTEx Inhouse batch limma")#+
+  #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
+plot_out
+ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_gtex_inhouse_batch.png")
+
+```
+
