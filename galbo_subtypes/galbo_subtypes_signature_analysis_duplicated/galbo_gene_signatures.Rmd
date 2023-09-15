@@ -1,0 +1,194 @@
+---
+title: "Apply Galbo Gene signatures"
+author: "Kevin Ryan"
+date: "2023-06-12"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The gene signatures
+```{r}
+pan_myCAF <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/clusters/pan_myCAF.txt", header = T)
+pan_iCAF <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/clusters/pan_iCAF.txt", header = T)
+pan_iCAF2 <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/clusters/pan_iCAF2.txt", header = T)
+pan_dCAF <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/clusters/pan_dCAF.txt", header = T)
+pan_pCAF <- read.table("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/clusters/pan_pCAF.txt", header = T)
+```
+
+```{r}
+pan_CAF <- list(pan_myCAF = pan_myCAF$pan.myCAF, pan_iCAF = pan_iCAF$pan.iCAF, pan_iCAF2 = pan_iCAF2$pan.iCAF.2, pan_dCAF = pan_dCAF$pan.dCAF, pan_pCAF = pan_pCAF$pan.pCAF)
+```
+
+```{r read in TPM data}
+salmon_tpm_path <- "~/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon/salmon.merged.gene_tpm.tsv"
+salmon_tpm_in <- read.table(salmon_tpm_path, header = T)
+colnames(salmon_tpm_in) <- gsub("X", "", colnames(salmon_tpm_in))
+```
+
+```{r}
+tpm_less_1 <- c()
+for (i in 1:nrow(salmon_tpm_in)){
+  if (sum(salmon_tpm_in[i,3:ncol(salmon_tpm_in)]) <= 1){
+    tpm_less_1[i] <- TRUE
+  } else {
+    tpm_less_1[i] <- FALSE
+  }
+}
+tofilter <- which(tpm_less_1 == TRUE)
+```
+
+```{r}
+salmon_tpm_in_filtered <- salmon_tpm_in[-c(tofilter),]
+salmon_tpm_in_filtered <- salmon_tpm_in_filtered %>% dplyr::select(-c(gene_id))
+n_occur <- data.frame(table(salmon_tpm_in_filtered$gene_name))
+dups <- salmon_tpm_in_filtered[salmon_tpm_in_filtered$gene_name %in% n_occur$Var1[n_occur$Freq > 1],]
+not_dups <- salmon_tpm_in_filtered[!(salmon_tpm_in_filtered$gene_name %in% n_occur$Var1[n_occur$Freq > 1]),]
+dups_summarise <- dups %>% group_by(gene_name) %>% dplyr::summarise((across(where(is.numeric), median)))
+salmon_tpm_in_filtered_not_dup <- rbind.data.frame(not_dups, dups_summarise)
+# get rid of genes with median zero for all samples
+tpm_less_1 <- c()
+for (i in 1:nrow(salmon_tpm_in_filtered_not_dup)){
+  if (sum(salmon_tpm_in_filtered_not_dup[i,ncol(salmon_tpm_in_filtered_not_dup)]) <= 1){
+    tpm_less_1[i] <- TRUE
+  } else {
+    tpm_less_1[i] <- FALSE
+  }
+}
+tofilter <- which(tpm_less_1 == TRUE)
+salmon_tpm_in_filtered_median_not_dup <- salmon_tpm_in_filtered_not_dup[-c(tofilter),]
+
+rownames(salmon_tpm_in_filtered_median_not_dup) <- salmon_tpm_in_filtered_median_not_dup$gene_name
+salmon_tpm_in_filtered_median_not_dup <- salmon_tpm_in_filtered_median_not_dup %>% dplyr::select(-c(gene_name))
+```
+
+```{r}
+zscore_normalised_tpm <- t(scale(t(log2(salmon_tpm_in_filtered_median_not_dup+1))))
+```
+
+```{r}
+zscore_normalised_tpm_myCAF <- zscore_normalised_tpm[rownames(zscore_normalised_tpm) %in% pan_CAF[[1]],]
+zscore_normalised_tpm_myCAF_mean <- apply(zscore_normalised_tpm_myCAF, 2, mean)
+zscore_normalised_tpm_myCAF_mean
+```
+
+```{r}
+zscore_normalised_tpm_results <- list()
+for (i in 1:length(pan_CAF)){
+  df <- zscore_normalised_tpm[rownames(zscore_normalised_tpm) %in% pan_CAF[[i]],]
+  avg_zscore <- apply(df, 2, mean)
+  zscore_normalised_tpm_results[[i]] <- avg_zscore
+  #zscore_normalised_tpm_results <- rbind.data.frame(zscore_normalised_tpm_results, avg_zscore)
+}
+names(zscore_normalised_tpm_results) <- names(pan_CAF)
+zscore_normalised_tpm_results <- t(data.frame(zscore_normalised_tpm_results))
+```
+
+```{r}
+zscore_normalised_tpm_results
+```
+
+```{r}
+caf_geneset <- GeneSetCollection(pan_CAF)
+```
+
+```{r}
+library(ComplexHeatmap)
+Heatmap(zscore_normalised_tpm_results)
+```
+
+```{r}
+metadata <- read.csv(file = "~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/metadata/reformat_samples_extra_info.csv")
+colnames(metadata)[1] <- "Mixture"
+metadata$Mixture <- as.character(metadata$Mixture)
+metadata$Condition <- ifelse(metadata$Condition == "Tumour", "CAF", "TAN")
+cibersort_output <- read.csv("~/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/cibersort/CIBERSORTx_Job14_Results.csv")
+cibersort_output$Mixture <- gsub(pattern = "X", replacement = "", x = cibersort_output$Mixture)
+cibersort_output <- full_join(cibersort_output, metadata)
+
+```
+
+```{r}
+cibersort_output
+```
+
+```{r}
+zscore_normalised_tpm_results_t <- data.frame(t(zscore_normalised_tpm_results))
+zscore_normalised_tpm_results_t <- zscore_normalised_tpm_results_t %>% tibble::rownames_to_column("Mixture")
+cibersort_zscores_combined <- full_join(zscore_normalised_tpm_results_t, cibersort_output)
+cibersort_zscores_combined_no_meta <- cibersort_zscores_combined[,2:9]
+rownames(cibersort_zscores_combined_no_meta) <- cibersort_zscores_combined$Mixture
+```
+
+```{r}
+corrplot(cor(cibersort_zscores_combined_no_meta))
+```
+
+```{r}
+hclust_data <- cibersort_zscores_combined[,2:6]
+rownames(hclust_data) <- cibersort_zscores_combined$Mixture
+hclust_test <- hclust(dist(hclust_data))
+cibersort_zscores_combined$Grade <- as.factor(cibersort_zscores_combined$Grade)
+grade <- levels(cibersort_zscores_combined$Grade)
+
+dend <- as.dendrogram(hclust_test)
+labels_colors(dend) <-
+  colorspace::rainbow_hcl(2)[sort_levels_values(
+    as.numeric(cibersort_zscores_combined$Grade)[order.dendrogram(dend)]
+  )]
+# labels(dend) <- paste(as.character(cibersort_output_with_metadata$Grade)[order.dendrogram(dend)],
+#                       "(",labels(dend),")", 
+#                       sep = "")
+
+labels(dend) <- as.character(cibersort_zscores_combined$Grade)[order.dendrogram(dend)]
+plot(dend)
+```
+
+
+```{r}
+## cluster and label by patient, colour by condition
+cibersort_zscores_combined$Patient <- as.factor(cibersort_zscores_combined$Patient)
+cibersort_zscores_combined$Condition <- as.factor(cibersort_zscores_combined$Condition)
+patient <- levels(cibersort_zscores_combined$Patient)
+condition <- levels(cibersort_zscores_combined$Condition)
+dend2 <- as.dendrogram(hclust_test)
+labels_colors(dend2) <-
+  colorspace::rainbow_hcl(2)[sort_levels_values(
+    as.numeric(cibersort_zscores_combined$Condition)[order.dendrogram(dend2)]
+  )]
+labels(dend2) <- as.character(cibersort_zscores_combined$Patient)[order.dendrogram(dend2)]
+plot(dend2, main = "Clustered gene signature results", xlab = "Patient")
+legend("topleft", legend = condition, fill = rainbow_hcl(2))
+```
+
+```{r}
+## cluster and label by patient, colour by histology
+dend3 <- as.dendrogram(hclust_test)
+cibersort_zscores_combined$Histology <- as.factor(cibersort_zscores_combined$Histology)
+histology <- levels(cibersort_zscores_combined$Histology)
+labels(dend3) <- as.character(cibersort_zscores_combined$Patient)[order.dendrogram(dend3)]
+labels_colors(dend3) <-
+  colorspace::rainbow_hcl(2)[sort_levels_values(
+    as.numeric(cibersort_zscores_combined$Histology)[order.dendrogram(dend3)]
+  )]
+plot(dend3, main = "Clustered gene signature results", xlab = "Patient")
+legend("topleft", legend = histology, fill = rainbow_hcl(2))
+```
+
+```{r}
+## cluster and label by patient, colour by PR status
+dend4 <- as.dendrogram(hclust_test)
+cibersort_zscores_combined$PR <- as.factor(cibersort_zscores_combined$PR)
+pr <- levels(cibersort_zscores_combined$PR)
+labels(dend4) <- as.character(cibersort_zscores_combined$PR)[order.dendrogram(dend4)]
+labels_colors(dend4) <-
+  colorspace::rainbow_hcl(2)[sort_levels_values(
+    as.numeric(cibersort_zscores_combined$PR)[order.dendrogram(dend4)]
+  )]
+plot(dend4, main = "Clustered gene signature results", xlab = "Patient")
+legend("topleft", legend = pr, fill = rainbow_hcl(2))
+```

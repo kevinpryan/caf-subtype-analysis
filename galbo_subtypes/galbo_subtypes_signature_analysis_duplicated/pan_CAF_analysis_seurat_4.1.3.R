@@ -11,26 +11,28 @@ library(vroom)
 
 Sys.setenv(R_MATRIX_WARN_DEPRECATED_COERCE = 0)
 
-mel_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/GSE72056_melanoma_cafs_resolution_0.5.Rds")
+mel_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/GSE72056_melanoma_cafs_resolution_0.5_seurat_4.1.3.Rds")
 Melanoma_cafs_ids <- c("Mel CAFs 1", "Mel CAFs 2")
 names(Melanoma_cafs_ids) <- levels(mel_human_caf)
 mel_human_caf <-RenameIdents(mel_human_caf, Melanoma_cafs_ids)
 DimPlot(mel_human_caf)
 
-hnsc_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/GSE103322_hnsc_cafs_resolution_0.3_hnsc.Rds")
+hnsc_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/GSE103322_hnsc_cafs_resolution_0.3_hnsc_seurat_4.1.3.Rds")
 HNSCC_cafs_ids <- c("HNSCC CAFs 1", "HNSCC CAFs 2", "HNSCC CAFs 3", "HNSCC CAFs 4", "HNSCC CAFs 5")
 names(HNSCC_cafs_ids) <- levels(hnsc_human_caf)
 hnsc_human_caf <- RenameIdents(hnsc_human_caf, HNSCC_cafs_ids)
 DimPlot(hnsc_human_caf)
 
-lung_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/LC_cafs_2.Rds")
+lung_human_caf <- readRDS("~/Documents/PhD/subtypes/caf-subtype-analysis/galbo_subtypes/data/outputs/LC_cafs_2_seurat_4.1.3.Rds")
 Lung_cafs_ids <- c("LC CAFs 1", "LC CAFs 2", "LC CAFs 3", "LC CAFs 4")
 names(Lung_cafs_ids) <- levels(lung_human_caf)
 lung_human_cancer_resolution0.1 <-RenameIdents(lung_human_caf, Lung_cafs_ids)
 DimPlot(lung_human_caf)
 
 caf.anchors <- FindIntegrationAnchors(object.list = list(mel_human_caf, hnsc_human_caf, lung_human_caf), dims = 1:20, k.filter = 150)
-caf.combined <- IntegrateData(anchorset = caf.anchors, dims = 1:20)
+#caf.combined <- IntegrateData(anchorset = caf.anchors, dims = 1:20)
+# reduce k.weight to nmber of cells in sample with the lowest cell count to prevent error - 61 as per https://github.com/satijalab/seurat/issues/3930
+caf.combined <- IntegrateData(anchorset = caf.anchors, dims = 1:20, k.weight = 61)
 DefaultAssay(caf.combined) <- "integrated"
 caf.combined <- ScaleData(caf.combined, verbose = FALSE)
 caf.combined <- RunPCA(caf.combined, features = VariableFeatures(object = caf.combined))
@@ -50,20 +52,28 @@ caf.combined <- FindNeighbors(caf.combined, reduction = "pca", dims = 1:30)
 caf.combined.resolution.02 <- FindClusters(caf.combined, resolution = 0.2)
 DimPlot(caf.combined.resolution.02, reduction = "umap", label = TRUE)
 caf.combined.resolution.02.markers <- FindAllMarkers(caf.combined.resolution.02, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-caf.combined.resolution.02.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
-caf.combined.resolution.02.markers.top20 <- caf.combined.resolution.02.markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_logFC)
-DoHeatmap(caf.combined.resolution.02, features = caf.combined.resolution.05.markers.top20$gene, label = F) + NoLegend()
+caf.combined.resolution.02.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_log2FC)
+caf.combined.resolution.02.markers.top20 <- caf.combined.resolution.02.markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC)
+# error in original code
+##DoHeatmap(caf.combined.resolution.02, features = caf.combined.resolution.05.markers.top20$gene, label = F) + NoLegend()
+DoHeatmap(caf.combined.resolution.02, features = caf.combined.resolution.02.markers.top20$gene, label = F)
 integrated_cafs_ids <- c("Pan-myCAF", "Pan-dCAF", "Pan-iCAF", "Pan-iCAF-2", "Pan-nCAF", "LQ-CAF", "Pan-pCAF")
 names(integrated_cafs_ids) <- levels(caf.combined.resolution.02)
 caf.combined.resolution.02 <-RenameIdents(caf.combined.resolution.02, integrated_cafs_ids)
 features <- c('ACTA2', 'MYH11', 'TAGLN', 'MCAM', 'MYLK', 'COL1A1', 'COL3A1', 'COL10A1', 'MMP1', 'MMP11', 'STC1', 'CFD', 'C3', 'CXCL14', 'CXCL12', 'BDKRB1', 'CLU', 'CXCL2', 'ICAM1', 'TNFAIP3', 'APOC1', 'TPD52L1', 'TPD52', 'CXCR4', 'CCL19', 'C10orf10', 'BIRC5', 'TOP2A', 'CDK1', 'CDC25C', 'CDC45')
-DoHeatmap(caf.combined.resolution.02, features = 'STC1, IGF1', label = F) + NoLegend()
+
+
 #cell cycle analysis of 
 s.genes <- cc.genes$s.genes
 g2m.genes <- cc.genes$g2m.genes
 l1 <- CellCycleScoring(caf.combined.resolution.02, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
 head(caf.combined.resolution.02[[]])
 DimPlot(l1, reduction = "umap", group.by = 'Phase')
+
+## export data
+library(data.table)
+data_to_write_out <- GetAssayData(caf.combined.resolution.02, assay = "RNA", slot = "data")
+write.csv(data_to_write_out, file = "/home/rstudio/Desktop/caf_subpop_scrnaseq.csv", quote = F)
 #Qian et al functional gene sets
 pan_caf_file <- read.table(file.choose(), header = T, row.names = 1, sep = '\t')
 proteins <- c('COL1A1', 'COL1A2', 'COL3A1', 'COL4A1', 'COL4A2', 'COL5A1', 'COL5A2', 'COL6A1', 'COL7A1', 'COL8A1', 'COL10A1', 'COL11A1', 'COL12A1', 'COL13A1', 'COL14A1', 'COL15A1', 'COL16A1', 'COL18A1', 'BGN', 'DCN', 'LUM', 'TAGLN','ELN', 'FN1', 'MMP1', 'MMP2', 'MMP3', 'MMP9', 'MMP10', 'MMP11', 'MMP14', 'MMP19', 'SERPINE1', 'CTHRC1', 'THBS2', 'SULF1', 'TGFBI', 'COMP', 'INHBA', 'EGFL6', 'ANGPT2', 'PDGFA', 'PDGFC', 'VEGFA', 'ACTA2', 'MYL6', 'MYH9', 'MYH11', 'PLN', 'TPM1', 'TMP2', 'SORBS2', 'RRAS', 'RASL12', 'RASGRP2', 'CFD', 'CFI', 'C3', 'C7', 'CCL21', 'CXCL14', 'CXCL12', 'IL33', 'CXCL3', 'CXCL2', 'CXCL1', 'CCL2', 'CCXL26',  'IL6', 'IL7')
