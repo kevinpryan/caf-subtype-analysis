@@ -4,12 +4,11 @@ nextflow.enable.dsl=2
 // Check input path parameters to see if they exist
 def checkPathParamList = [
     params.metadata,
-    params.tx2gene
+    params.tx2gene,
+    params.counts
 ]
 // create file channel for parameters provided
 for (param in checkPathParamList) if (param) file(param, checkIfExists: true)
-
- //, mode: 'copy', overwrite = true
 
 process BATCH_EFFECT {
     label 'main_docker'
@@ -25,15 +24,14 @@ process BATCH_EFFECT {
     path(counts_matrix) // ch_counts
     output:
     // TODO
-    //path("out.txt"), emit: ch_qc_out
-    path("20231127-caf-batch-correction-subtypes-ptoforigin.md"), optional: true
-    path("20231127-caf-batch-correction-subtypes-ptoforigin.html"), optional: true
-    path("batch_effect_removed.txt"), emit: ch_metadata_outliers_removed
+    path("20231127-nextflow-caf-batch-correction-subtypes-ptoforigin.md"), optional: true
+    path("20231127-nextflow-caf-batch-correction-subtypes-ptoforigin.html"), optional: true
+    path("batch_corrected.txt"), emit: ch_metadata_outliers_removed
     //path("dds_remove_outliers_batch_corrected.Rds"), emit: ch_dds_remove_outliers_batch_corrected
     //path("dds_not_corrected_remove_outliers_no_inhouse.Rds"), emit: ch_dds_not_corrected_no_inhouse
     //script:
     shell:
-        script = "rmarkdown::render('20231127-caf-batch-correction-subtypes-ptoforigin.Rmd',"
+        script = "rmarkdown::render('20231127-nextflow-caf-batch-correction-subtypes-ptoforigin.Rmd',"
         script += "params = list("
         script += "metadata = '\$PWD/${metadata}', "
         script += "tx2gene = '\$PWD/${tx2gene}', "
@@ -42,7 +40,7 @@ process BATCH_EFFECT {
         script += "out = 'batch_corrected.txt', output_dir = getwd())"
         script += ")"
     """
-    cp -L ${projectDir}/bin/20231127-caf-batch-correction-subtypes-ptoforigin.Rmd 20231127-caf-batch-correction-subtypes-ptoforigin.Rmd 
+    cp -L ${projectDir}/bin/20231127-nextflow-caf-batch-correction-subtypes-ptoforigin.Rmd 20231127-nextflow-caf-batch-correction-subtypes-ptoforigin.Rmd 
     Rscript -e "${script}"
     """
 }
@@ -70,6 +68,4 @@ BATCH_EFFECT(
     ch_tx2gene,
     ch_counts
 )
-*/
-
 }

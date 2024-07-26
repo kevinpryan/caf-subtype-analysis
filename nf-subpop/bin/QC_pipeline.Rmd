@@ -41,7 +41,13 @@ This script carries out initial QC, including outlier removal and batch correcti
 ## Convert command-line arguments to variables
 
 ```{r}
+#exists(params)
+#params$method == "nextflow"
+```
+
+```{r}
 if (params$method == "nextflow") {
+#if (exists("params") == TRUE){
   metadata_path <- params$metadata
   print(paste("metadata file: ", metadata_path))
   tx2gene_file <- params$tx2gene
@@ -111,6 +117,9 @@ metadata_original_inhouse <- metadata_original[metadata_original$Study == "InHou
 metadata_original_inhouse$Sample <- as.character(rownames(metadata_original_inhouse))
 metadata_original_inhouse$directory <- gsub("kevin", sub, metadata_original_inhouse$directory)
 inhouse_metadata_combined <- full_join(inhouse_metadata_in, metadata_original_inhouse)
+#metadata_with_patient_20230607 <- read.csv("~/Downloads/CAF_subpopulation_data - test_reduce_patients (1).csv")
+#colnames(metadata_with_patient_20230607)[1] <- "Patient_jul2023"
+
 # metadata file created with create_metadata.R
 #metadata <- read.table(file.path(metadata), row.names = 1, sep = "\t")
 metadata <- read.table(metadata_path, sep = "\t")

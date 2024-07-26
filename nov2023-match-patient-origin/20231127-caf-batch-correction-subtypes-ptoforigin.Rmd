@@ -1,0 +1,400 @@
+---
+title: "Batch correction with patient of origin"
+author: "Kevin Ryan"
+date: "2023-11-27"
+output: html_document
+params:
+  metadata: ""
+  tx2gene: ""
+  out: ""
+  method: ""
+  output_dir: ""
+  counts_matrix: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = F, warning=F}
+#library(here)
+# library(biomaRt)
+library(tximeta)
+library(DESeq2)
+# library(ggplot2)
+# library(PCAtools)
+# library(sva)
+# library(RColorBrewer)
+# library(stringr)
+# library(AnnotationDbi)
+# # library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+library(dplyr)
+```
+
+```{r}
+nvars_function <- function(vsd, ntop = 500){
+    rv <- rowVars(assay(vsd))
+  # select the ntop genes by variance
+  select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+  vsd_out <- vsd
+  assay(vsd_out) <- assay(vsd_out)[,select] 
+  return(vsd_out)
+}
+```
+
+```{r}
+if (params$method == "nextflow") {
+#if (exists("params") == TRUE){
+  metadata_path <- params$metadata
+  print(paste("metadata file: ", metadata_path))
+  tx2gene_file <- params$tx2gene
+  print(paste("tx2gene file: ", tx2gene_file))
+  #out <- params$out
+  #print(paste("out file: ", out))
+  #inhouse_metadata <- params$inhouse_metadata
+  metadata_full <- read.csv(metadata_path)
+  counts_matrix_in <- read.csv(params$counts_matrix, row.names = 1, header = T)
+  out <- "batch_effect_removed.txt"
+  #metadata_original <- read.table(params$metadata_without_patient)
+  #} else if (method == "rstudio") {
+} else {
+  #metadata <- "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/metadata/metadata_full.txt"
+  metadata_path <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nov2023-match-patient-origin/outputs/metadata_full_with_patient_20231127.csv"
+  tx2gene_file <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+  out <- "batch_effect_removed.txt"
+  #inhouse_metadata <- "~/Documents/PhD/CAF_data/InHouse/reformat_samples.csv"
+  metadata_full <- read.csv(metadata_path)
+  counts_matrix_in <- read.csv("~/Documents/PhD/subtypes/caf-subtype-analysis/nov2023-match-patient-origin/outputs/20231127_counts_matrix_subpopulation.txt", row.names = 1, header = T)
+}
+sub <- "rstudio"
+```
+
+```{r}
+filter_out_low_expressed <- function(dds){
+  library(DESeq2)
+  print(paste("no of genes before filtering...", nrow(dds)))
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+```
+
+```{r}
+# want to read in subpop data
+metadata <- read.csv(metadata_path)
+metadata$directory <- gsub("kevin", sub, metadata$directory)
+metadata_subpop <- metadata %>% dplyr::filter(Study != "InHouse")
+files <- file.path(metadata_subpop$directory, 
+                   metadata_subpop$Samplenames_old, 
+                   "quant.sf") 
+# make coldata given information for tximeta
+coldata_subpop <- data.frame(files, 
+                             names=metadata_subpop$Sample, 
+                             Study = metadata_subpop$Study, 
+                      Subpopulation = metadata_subpop$Subpopulation, 
+                      Tumor_JuxtaTumor = metadata_subpop$Tumor_JuxtaTumor,
+                      Patient = metadata_subpop$Patient,
+                      stringsAsFactors=FALSE)
+
+tx2gene <- read.table(tx2gene_file, header = T)
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=round(counts_matrix_in), colData=coldata_subpop, design=~ 1)
+dds <- filter_out_low_expressed(dds)
+vsd <- vst(dds, blind = TRUE)
+```
+
+```{r}
+# assay(dds_from_matrix)[1:5,1:5]
+# assay(dds)[1:5,1:5]
+# which (which (assay(dds_from_matrix) == assay(dds)) == FALSE)
+```
+
+#### Exploratory data analysis - PCA
+
+##### PCA + clinical correlations subpopulation data
+
+For consistency between the DESeq2 `plotPCA` function (which by default takes the 500 most variable genes) and the PCATools `pca` function, all genes were used when carrying out PCA.
+
+```{r PCA all genes}
+pca_before_correction_subpop <- plotPCA(vsd, intgroup = c("Subpopulation"), ntop = nrow(vsd)) +
+labs(colour = "Subpopulation")  +
+  ggtitle("Original data") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_before_correction_subpop
+
+pca_before_correction_study <- plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd)) +
+    #ggtitle("PCA using Ensembl gene ID version") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+labs(colour = "Study") +
+  ggtitle("Original data") 
+pca_before_correction_study
+
+pca_before_correction_tumor_juxtatumor <- plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd)) + 
+  ggtitle("Original data") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+  labs(colour = "Sample")
+
+pca_before_correction_tumor_juxtatumor
+pca_before_correction_patient <- plotPCA(vsd, intgroup = c("Patient"), ntop = nrow(vsd)) + 
+  ggtitle("Original data") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+  labs(colour = "Patient")
+pca_before_correction_patient
+```
+
+```{r PCA default genes}
+pca_before_correction_subpop <- plotPCA(vsd, intgroup = c("Subpopulation")
+                                        ) + 
+theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+labs(colour = "Subpopulation")  +
+  ggtitle("Original data") 
+
+pca_before_correction_subpop
+
+pca_before_correction_study <- plotPCA(vsd, intgroup = c("Study")
+                                       ) +
+theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+labs(colour = "Study") +
+  ggtitle("Original data")
+
+pca_before_correction_study
+
+pca_before_correction_tumor_juxtatumor <- plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor")#, 
+                                                  ) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+  ggtitle("Original data")
+
+pca_before_correction_tumor_juxtatumor
+pca_before_correction_patient <- plotPCA(vsd, intgroup = c("Patient")
+                                         ) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
+  ggtitle("Original data")
+pca_before_correction_patient
+```
+
+```{r}
+
+vsd.mat <- assay(vsd)
+rownames(metadata) <- metadata$Sample
+metadata_pca <- coldata_subpop %>% dplyr::select(names, Study, Subpopulation, Patient, Tumor_JuxtaTumor)
+rownames(metadata_pca) <- metadata_pca$names
+rownames(metadata_pca) <- gsub("-", ".", rownames(metadata_pca))
+metadata_pca <- metadata_pca %>% dplyr::select(-c(names))
+p <- pca(vsd.mat, metadata = metadata_pca)
+genes_base <- str_split_fixed(string = rownames(p$loadings), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+# keep ensg version of newnames is na or is duplicated
+newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+    rownames(p$loadings), newnames_original)
+rownames(p$loadings) <- newnames
+```
+
+
+```{r Biplot}
+biplot(p, showLoadings = T, lab = NULL, colby = "Study")
+```
+
+## Clinical correlations
+
+```{r, include = FALSE, warning=FALSE}
+peigencor <- suppressWarnings(eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations before batch-effect removal',
+    cexMain = 1.3,
+    colFrame = 'white',
+    plotRsquared = TRUE))
+```
+
+```{r}
+peigencor
+```
+
+```{r Combat-Seq Ensembl}
+# remove batch effects
+dds.mat <- assay(dds)
+batch <- colData(dds)$Patient
+covs <- as.data.frame(colData(dds)) %>% dplyr::select(Patient)
+treatment_var <- colData(dds)$Tumor_JuxtaTumor
+print("batch correcting...")
+ptm <- proc.time()
+#dds.mat.batch.corrected <- ComBat_seq(counts = dds.mat, batch = batch, group = treatment_var, full_mod = TRUE)
+time_taken <- proc.time() - ptm
+print("time taken...")
+print(time_taken)
+#dds.remove.outliers.mat.batch.corrected
+# for some reason started to get the na values due to too large numbers error here, correcting by dividing everything by 4 20230517
+
+
+#dds.remove.outliers.batch.corrected <- DESeqDataSetFromMatrix(round(dds.remove.outliers.mat.batch.corrected/4), colData = colData(dds.remove.outliers), design = ~1)
+#vsd.remove.outliers.batch.corrected <- vst(dds.remove.outliers.batch.corrected, blind = TRUE)
+```
+
+```{r}
+# remove batch effects with limma
+# set up model matrix
+Tumor_JuxtaTumor <- factor(coldata_subpop$Tumor_JuxtaTumor, levels=c("juxtatumor","tumor"))
+
+design <- model.matrix(~Tumor_JuxtaTumor)
+vsd.mat.batch.corrected <- limma::removeBatchEffect(x = vsd.mat, 
+                                                    batch = coldata_subpop$Study, 
+                                                    batch2 = batch, 
+                                                    #group = treatment_var
+                                                    design = design
+                                                    )
+
+remove_batch_effect <- function(vsd.mat, include_study, include_patient){
+  vsd.mat.batch.corrected <- limma::removeBatchEffect(x = vsd.mat, 
+                                                    batch = coldata_subpop$Study, 
+                                                    batch2 = batch
+                                                    )
+}
+
+nvars_function_matrix <- function(vsd.mat, ntop = 500){
+    rv <- rowVars(vsd.mat)
+  # select the ntop genes by variance
+  select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+  vsd.mat.out <- vsd.mat[select,] 
+  return(vsd.mat.out)
+}
+vsd.mat.batch.corrected.500 <- nvars_function_matrix(vsd.mat.batch.corrected)
+```
+
+```{r}
+p_batch_corrected <- pca(vsd.mat.batch.corrected.500, metadata = metadata_pca)
+genes_base <- str_split_fixed(string = rownames(p_batch_corrected$loadings), pattern = "\\.", n = 2)[,1]
+  newnames_original <- suppressWarnings(mapIds(EnsDb.Hsapiens.v86,
+    keys = genes_base,
+    column = 'SYMBOL',
+    keytype = 'GENEID'))
+
+# keep ensg version of newnames is na or is duplicated
+newnames <- ifelse(is.na(newnames_original) | duplicated(newnames_original),
+    rownames(p_batch_corrected$loadings), newnames_original)
+rownames(p_batch_corrected$loadings) <- newnames
+
+biplot(p_batch_corrected,   showLoadings = T, colby = "Subpopulation", legendPosition = "right", lab = NULL, title = "PCA biplot batch corrected by subpopulation")
+biplot(p_batch_corrected,   showLoadings = T, colby = "Study", legendPosition = "right", lab = NULL, title = "PCA biplot batch corrected by study")
+
+biplot(p,   showLoadings = T, colby = "Subpopulation", legendPosition = "right", lab = NULL, title = "PCA biplot before batch correction by subpopulation")
+biplot(p,   showLoadings = T, colby = "Study", legendPosition = "right", lab = NULL, title = "PCA biplot before batch correction by study")
+
+biplot(p,   showLoadings = T, colby = "Tumor_JuxtaTumor", legendPosition = "right", lab = NULL, title = "PCA biplot before batch correction by tumour juxtatumour")
+biplot(p_batch_corrected,   showLoadings = T, colby = "Tumor_JuxtaTumor", legendPosition = "right", lab = NULL, title = "PCA biplot after batch correction by tumour juxtatumour")
+
+```
+
+```{r, include = FALSE, warning=FALSE}
+peigencor <- suppressWarnings(eigencorplot(p_batch_corrected,
+    components = getComponents(p_batch_corrected, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations after batch-effect removal',
+    cexMain = 1.3,
+    colFrame = 'white',
+    plotRsquared = TRUE))
+```
+
+```{r}
+peigencor
+```
+
+Approach:
+
+1. Use `limma::removebatcheffects` on variance-stabilised transformed data to remove batch effects
+2. Get 2^ of this to unlog this
+3. Use this as input to CIBERSORT.
+4. Use the 2^ method for the inhouse sample too I suppose
+
+```{r}
+vsd.mat.batch.corrected
+non.log.vsd.mat.batch.corrected <- 2^vsd.mat.batch.corrected
+non.log.vsd.mat.batch.corrected <- rownames_to_column(as.data.frame(non.log.vsd.mat.batch.corrected), var = "Gene")
+colnames(non.log.vsd.mat.batch.corrected) <- gsub("\\.", "-", colnames(non.log.vsd.mat.batch.corrected))
+stopifnot(all(dds$names == colnames(non.log.vsd.mat.batch.corrected[2:ncol(non.log.vsd.mat.batch.corrected)])))
+non.log.vsd.mat.batch.corrected.for.cibersort <- non.log.vsd.mat.batch.corrected
+non.log.vsd.mat.batch.corrected.for.cibersort <- rbind(c("Gene", dds$Subpopulation), non.log.vsd.mat.batch.corrected.for.cibersort)
+#colnames(non.log.vsd.mat.batch.corrected.for.cibersort)[2:ncol(non.log.vsd.mat.batch.corrected.for.cibersort)] <- dds$Subpopulation
+dds$Subpopulation
+```
+
+```{r}
+s1_cols <- which(non.log.vsd.mat.batch.corrected.for.cibersort[1,] == "S1")
+s3_cols <- which(non.log.vsd.mat.batch.corrected.for.cibersort[1,] == "S3")
+s4_cols <- which(non.log.vsd.mat.batch.corrected.for.cibersort[1,] == "S4")
+
+s1_cols_length <- length(s1_cols)
+s3_cols_length <- length(s3_cols)
+s4_cols_length <- length(s4_cols)
+```
+
+```{r Put signature data in the right order ie all the S1s together etc}
+non.log.vsd.mat.batch.corrected.for.cibersort.order <- cbind.data.frame(non.log.vsd.mat.batch.corrected.for.cibersort$Gene,
+                                              non.log.vsd.mat.batch.corrected.for.cibersort[,s1_cols],
+                                              non.log.vsd.mat.batch.corrected.for.cibersort[,s3_cols],
+                                              non.log.vsd.mat.batch.corrected.for.cibersort[,s4_cols]
+                                              )
+colnames(non.log.vsd.mat.batch.corrected.for.cibersort.order) <- NULL
+rownames(non.log.vsd.mat.batch.corrected.for.cibersort.order) <- NULL
+#cols_no_inhouse <- c("genes", rep("S1", s1_cols_length), rep("S3", s3_cols_length), rep("S4", s4_cols_length))
+#non.log.vsd.mat.batch.corrected.for.cibersort.order <- rbind.data.frame(cols_no_inhouse, non.log.vsd.mat.batch.corrected.for.cibersort.order)
+```
+
+```{r}
+write.table(non.log.vsd.mat.batch.corrected.for.cibersort.order, file = out, sep = "\t", quote = F, row.names = F, col.names = F)
+```
+

@@ -1,0 +1,41 @@
+---
+title: "Fibroblast markers"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# About
+
+There are a number of different sources of fibroblast-specific markers. Here I want to curate them and get a list of markers that I can use to construct a signature matrix for CIBERSORTx.
+
+```{r, echo=FALSE}
+library(tidyverse)
+```
+
+## PanglaoDB
+
+```{r}
+panglao <- read_tsv("https://panglaodb.se/markers/PanglaoDB_markers_27_Mar_2020.tsv.gz")
+glimpse(panglao)
+```
+```{r Extract Fibroblast gene list}
+#panglao <- panglao[!(panglao$species == "Mm") & (panglao$`cell type` == "Fibroblasts"),]
+panglao <- panglao[panglao$`cell type` == "Fibroblasts",]
+panglao_fibroblast <- panglao$`official gene symbol`
+```
+
+## CellMarker
+
+```{r}
+cellmarker <- read_tsv("http://xteam.xbio.top/CellMarker/download/all_cell_markers.txt")
+cellmarker <- cellmarker[grep("\\.*[F|f]ibroblast", cellmarker$cellName),]
+```
+
+```{r Get rid of duplicates}
+
+```
+
+

@@ -15,7 +15,7 @@ process GENERATE_METADATA {
     input:
     val(out_full)
     val(out_reduced)
-    val(basedir)
+    path(basedir)
 
     output:
     path("*_full.txt"), emit: ch_generated_metadata
@@ -208,6 +208,7 @@ if (!params.metadata){
     ch_metadata = Channel.fromPath(params.metadata, checkIfExists: true)
 }
 
+/*
 if (!params.tx2gene){
     println "no tx2gene provided, generating..."
     GENERATE_TX2GENE(
@@ -236,4 +237,6 @@ QC(
     ch_inhouse_metadata,
     ch_metadata
 )
+*/
+
 }

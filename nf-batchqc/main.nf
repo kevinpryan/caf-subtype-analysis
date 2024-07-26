@@ -29,7 +29,7 @@ process BATCHQC {
     path(metadata)
 
     output:
-    path("batchqc_report_gtex_fibroblast.html"), emit: ch_batchqc
+    path("batchqc_*.html"), emit: ch_batchqc
 
     script:
     """

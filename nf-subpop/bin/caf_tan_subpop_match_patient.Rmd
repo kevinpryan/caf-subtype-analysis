@@ -9,20 +9,79 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-caf_matched <- read.csv("~/Downloads/CAF_subpopulation_data - Patient_matching (1).csv")
-caf_matched$Sample[duplicated(caf_matched$Sample)]
-caf_matched_3808 <- caf_matched %>% dplyr::filter(Study == "EGAD00001003808")
-caf_matched_3808_tumour <- caf_matched_3808 %>% dplyr::filter(Tumor_JuxtaTumor == "tumor")
-caf_matched_3808_juxtatumor <- caf_matched_3808 %>% dplyr::filter(Tumor_JuxtaTumor == "juxtatumor")
-n_distinct(caf_matched_3808_tumour$Patient)
-n_distinct(caf_matched_3808_juxtatumor$Patient)
+```{r}
+library(dplyr)
 ```
 
+```{r}
+test_reduce_pts <- read.csv("~/Documents/PhD/CAF_data/Patient_matching/CAF_subpopulation_data - test_reduce_patients.csv")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808") %>% group_by(Patient) %>% n_distinct()
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808" & Tumor_JuxtaTumor == "tumor") %>% group_by(Patient) %>% n_distinct()
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808" & Subtype_if_known == "LuminalA")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808")
+```
+
+```{r}
+test_reduce_pts <- read.csv("~/Documents/PhD/CAF_data/Patient_matching/CAF_subpopulation_data - test_reduce_patients_20230627.csv")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808") %>% group_by(Patient) %>% n_distinct()
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808" & Tumor_JuxtaTumor == "tumor") %>%  summarize(count_distinct = n_distinct(Patient))
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808" & Tumor_JuxtaTumor == "juxtatumor") %>%  summarize(count_distinct = n_distinct(Patient))
+
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808" & Subtype_if_known == "LuminalA")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808") %>%   summarize(count_distinct = n_distinct(Patient))
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001003808") %>% summarize(count_distinct = n_distinct(Patient)) 
+```
+
+# EGAD00001005744 Pelon et al
+
+```{r}
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001005744")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001005744") %>% summarise(length(unique(Patient)), .by = Patient)
+``` 
+
+Inferred 6 patients from the 28 samples, should be 5 - see Methods -> Cohorts of BC patients Pelon et al 2020 (Cancer-associated fibroblast heterogeneity in axillary lymph nodes drives metastases in breast cancer through complementary mechanisms)
+Most likely that A461-A462-A465U39	goes with Patient 29
+Switch it from patient 68 to patient 29 as we are not using the sample anyway
+
+```{r}
+test_reduce_pts <- read.csv("~/Documents/PhD/CAF_data/Patient_matching/CAF_subpopulation_data - test_reduce_patients_20230311.csv")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001005744") %>% summarise(length(unique(Patient)), .by = Patient) %>% nrow()
+```
+
+# EGAD00001004810
+
+```{r}
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810") %>% summarise(length(unique(Patient)), .by = Patient) %>% nrow()
+```
+
+Inferred 25 samples
+
+# EGAD00001003808 Costa et al 47 samps
+
+19 patients inferred, should be 16
+16 patients tumour, correct
+16 patients juxtatumour, should be 12
+
+```{r}
+test_reduce_pts <- read.csv("~/Documents/PhD/CAF_data/Patient_matching/CAF_subpopulation_data - test_reduce_patients_20230627.csv")
+test_reduce_pts %>% dplyr::filter(Study== "EGAD00001004810")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810") %>% group_by(Patient) %>% count(Patient)
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810" & Tumor_JuxtaTumor == "tumor")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810" & Tumor_JuxtaTumor == "juxtatumor")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810") %>% summarise(length(unique(Patient)), .by = Patient)
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810" & Tumor_JuxtaTumor == "tumor") %>%  summarize(count_distinct = n_distinct(Patient))
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810" & Tumor_JuxtaTumor == "juxtatumor") %>%  summarize(count_distinct = n_distinct(Patient))
+test_reduce_pts
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810" & Subtype_if_known == "LuminalA")
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810") %>%   summarize(count_distinct = n_distinct(Patient))
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001004810") %>% summarize(count_distinct = n_distinct(Patient)) 
+```
+
+# EGAD00001006144
+
+```{r}
+test_reduce_pts %>% dplyr::filter(Study == "EGAD00001006144") %>% summarise(length(unique(Patient)), .by = Patient) %>% nrow()
+```
+
+6 patients
 

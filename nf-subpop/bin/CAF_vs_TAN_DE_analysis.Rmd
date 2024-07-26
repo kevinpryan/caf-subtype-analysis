@@ -177,6 +177,14 @@ return(df)
 # RNA-Seq analysis
 *Barry Digby, Pilib O Broin* 
 
+# Note from Kevin
+
+The results for particular genes, particularly WT1, will change depending on some initial choices:
+- How the tx2gene object is generated (using the getBM method or using the `/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/bin/generate_tx2gene_table.R` script to generate it from the GTF file you used to annotate your transcripts).
+- Whether you convert your ENST transcript symbols to ENSG gene symbol (versioned) or you convert them to HGNC symbol
+
+My preferred method is generating it from your GTF file as it is more reproducible - ENST transcript id versions (ENST2334.3) change over time so you can lose information. I prefer to do the DE analysis using ENSG version and converting to HGNC symbol afterwards. See /home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/bin/CAF_vs_TAN_DE_analysis.Rmd
+
 # Software Versions
 
 ```{r Input files,  message=F, warning=F}
@@ -889,6 +897,11 @@ up <- annotate_de_genes_ensembl_gene_id(up_unannotated)
 down <- annotate_de_genes_ensembl_gene_id(down_unannotated)
 ```
 
+```{r}
+all_de_genes <- rbind.data.frame(up,down)
+#write.table(all_de_genes, file = "~/Documents/PhD/rna_seq_bc/edgeR/deseq_edge_r_comparison/2023-11-24-de_genes_deseq2_h0_lfc0_cutoff_p0.05_lfc1.txt", quote = F, sep = "\t", row.names = F)
+```
+
 ```{R, message=F, warning=F}
 # alternative method - get very few DE genes
 # res2 <- results(dds, alpha = 0.05, c("Condition", "CAF", "TAN"), altHypothesis = "greaterAbs", lfcThreshold = 1)#  filterFun = ihw,
@@ -993,6 +1006,120 @@ geneplotter::plotMA(maplot, ylim=c(-3,3), main = "CAF vs. TAN DEGs LFC > |1| & a
 
 volcano_caf_tan_lfc_1
 ```
+
+```{r}
+## remove NA values from results
+lfc <- na.omit(lfc)
+lfc_hgnc <- convert_ensg_version_to_hgnc_df_rownames(lfc)
+## calculate min/max axis values for plot (optional)
+min_width <- min(lfc_hgnc$log2FoldChange)
+max_width <- max(lfc_hgnc$log2FoldChange)
+max_height <- -log10(min(lfc_hgnc[lfc_hgnc$pvalue>0, 5]))
+## Grab top 10 up-reg genes for plot
+up <- subset(lfc_hgnc, lfc_hgnc$log2FoldChange > 1 & lfc_hgnc$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+
+## Grab top 10 down-reg genes for plot
+down <- subset(lfc_hgnc, lfc_hgnc$log2FoldChange < -1 & lfc_hgnc$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+
+## place top 20 DE genes in vector (optinal...)
+plot_top_20 <- c(up_list, down_list)
+plot_top_20
+volcano_caf_tan_lfc_1_labelled_top_20 <- EnhancedVolcano(lfc_hgnc,
+                lab=rownames(lfc_hgnc),
+                x="log2FoldChange",
+                y="pvalue",
+                selectLab=plot_top_20,
+                drawConnectors=TRUE,
+                legendPosition = "none",
+                FCcutoff=1.0,
+                pCutoff=0.05,
+                title = "CAF vs TAN LFC > |1| & padj < 0.05",
+                subtitle="CAF vs. TAN",
+                caption = paste0('Total Genes = ', nrow(lfc_hgnc)),
+                xlim=c(min_width, max_width),
+                ylim=c(0, max_height))
+```
+
+```{r}
+## Grab top 5 up-reg genes for plot
+up <- subset(lfc_hgnc, lfc_hgnc$log2FoldChange > 1 & lfc_hgnc$padj <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=5L)
+
+## Grab top 5 down-reg genes for plot
+down <- subset(lfc_hgnc, lfc_hgnc$log2FoldChange < -1 & lfc_hgnc$padj <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=5L)
+
+## place top 20 DE genes in vector (optinal...)
+plot_top_10 <- c(up_list, down_list)
+plot_top_10
+volcano_caf_tan_lfc_1_labelled_top_10 <- EnhancedVolcano(lfc_hgnc,
+                lab=rownames(lfc_hgnc),
+                x="log2FoldChange",
+                y="pvalue",
+                #y = "padj",
+                selectLab=plot_top_10,
+                drawConnectors=TRUE,
+                legendPosition = "none",
+                FCcutoff=1.0,
+                #pCutoff=0.05,
+                #pCutoffCol = "padj",
+                title = "CAF vs TAN LFC > |1| & padj < 0.05",
+                subtitle="",
+                #caption = paste0('Total Genes = ', nrow(lfc_hgnc)),
+                xlim=c(min_width, max_width),
+                ylim=c(0, max_height))
+
+volcano_caf_tan_lfc_1_labelled_top_10
+
+# test changing name of gene not being found by enhancedvolcano
+lfc_hgnc_relabel <- lfc_hgnc
+lfc_hgnc_relabel["AC079776.2",]
+rownames(lfc_hgnc_relabel)[which(rownames(lfc_hgnc_relabel) == "AC079776.2")] <- "AC079776v2"
+lfc_hgnc_relabel["AC079776v2",]
+
+## Grab top 5 up-reg genes for plot
+up_test <- subset(lfc_hgnc_relabel, lfc_hgnc_relabel$log2FoldChange > 1 & lfc_hgnc_relabel$pvalue <= 0.05)
+up_test <- up_test[order(-up_test$log2FoldChange),]
+up_list_test <- head(rownames(up_test), n=5L)
+
+## Grab top 5 down-reg genes for plot
+down_test <- subset(lfc_hgnc_relabel, lfc_hgnc_relabel$log2FoldChange < -1 & lfc_hgnc_relabel$pvalue <= 0.05)
+down_test <- down_test[order(down_test$log2FoldChange),]
+down_list_test <- head(rownames(down_test), n=5L)
+
+## place top 20 DE genes in vector (optinal...)
+plot_top_10 <- c(up_list_test, down_list_test)
+
+
+
+
+volcano_caf_tan_lfc_1_labelled_test <- EnhancedVolcano(lfc_hgnc_relabel,
+                lab=rownames(lfc_hgnc_relabel),
+                x="log2FoldChange",
+                y="pvalue",
+                selectLab=plot_top_10,
+                drawConnectors=TRUE,
+                legendPosition = "none",
+                FCcutoff=1.0,
+                #pCutoff=0.05,
+                title = "CAF vs TAN LFC > |1| & padj < 0.05",
+                subtitle="",
+                #caption = paste0('Total Genes = ', nrow(lfc_hgnc)),
+                xlim=c(min_width, max_width),
+                ylim=c(0, max_height))
+volcano_caf_tan_lfc_1_labelled_test
+```
+
+```{r}
+volcano_caf_tan_lfc_1_labelled_top_10
+```
+
 
 ## Heatmap (A)
 
@@ -1671,6 +1798,17 @@ p <- cnetplot(egmt, showCategory = cluster3, foldChange = background, circular=T
 p + scale_color_gradientn(colours = c("grey", "red"), name = "Log2FoldChange")
 ```
 
+
+```{r}
+cta_genes <- read.table("~/Documents/PhD/lens/cta_and_self_antigen.homo_sapiens.gene_list")$V1
+up_genes <- up$Gene
+down_genes <- down$Gene
+length(up_genes)
+length(down_genes)
+cta_genes[which(cta_genes %in% up_genes)]
+cta_genes[which(cta_genes %in% down_genes)]
+```
+
 ### Comparison with other studies
 
 A set of 414 CAF-specific marker genes were proposed by Kazakova et al. Here we compare the sets of genes to the genes found to be DE here - Table2 from study
@@ -1690,6 +1828,7 @@ inhouse_up[which(inhouse_up %in% kazakova_markers_genes)]
 inhouse_up[which(inhouse_up %in% kazakova_markers_breast_cancer_genes)]
 
 ```
+
 
 ```{r}
 # Load the package
@@ -1784,7 +1923,7 @@ dev.off()
 ```{r}
 #update.packages("ragg")
 #install.packages("svglite")
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.svg")
+svg("~/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.svg")
 plot(volcano_caf_tan_lfc_1)
 dev.off()
 #(filename = "/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/volcano_plot_caf_tan.svg", plot = volcano_caf_tan_lfc_1, device = "svg")
@@ -1794,18 +1933,36 @@ dev.off()
 ```
 
 ```{r}
+svg("~/Documents/PhD/Posters/volcano_plot_caf_tan_20230711.svg")
+plot(volcano_caf_tan_lfc_1_labelled_top_20)
+dev.off()
+```
+
+```{r}
+png("~/Documents/PhD/Posters/volcano_plot_caf_tan_20230711.png")
+plot(volcano_caf_tan_lfc_1_labelled_top_20)
+dev.off()
+```
+
+```{r}
+png("~/Documents/PhD/Posters/volcano_plot_caf_tan_20231108.png")
+plot(volcano_caf_tan_lfc_1_labelled_top_10)
+dev.off()
+```
+
+```{r}
 ggar_obj <- ggarrange(plotlist = myplots, nrow = 2, ncol = 2, common.legend = F)#, legend = "bottom")
 ggar_obj
 ```
 
 ```{r}
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/dotplot_bp_caf_tan.svg")
+svg("~/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/dotplot_bp_caf_tan.svg")
 plot(dotplot_biological_process)
 dev.off()
 ```
 
 ```{r}
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/upset_plot_caf_tan.svg")
+svg("~/Documents/PhD/notes/mini_viva_report/images/current_research/figure1/upset_plot_caf_tan.svg")
 upset_plot
 dev.off()
 #myplots <- list(heatmap_caf_tan, volcano_caf_tan_lfc_1, dotplot_biological_process, upset_plot)

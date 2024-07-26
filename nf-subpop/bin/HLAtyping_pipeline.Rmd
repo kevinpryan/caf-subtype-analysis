@@ -155,8 +155,22 @@ data_combined
 ```
 
 ```{r}
-data_combined_hla_only <- data_combined[,c(1:7)]
+data_combined_hla_only <- data_combined[,c(1:8)]
 data_combined_hla_only
+```
+
+```{r}
+current_27 <- c("B73T37", "B73T40", "B86T14", "B86T17")
+current_23 <- c("B86T23","B86T24","B86T22","B86T21")
+data_combined_hla_only %>% dplyr::filter(Sample %in% current_27)
+data_combined_hla_only %>% dplyr::filter(Sample %in% current_23)
+data_combined_hla_only %>% dplyr::filter(Sample %in% "B86T16")
+data_combined_hla_only %>% dplyr::filter(Sample %in% "B86T18")
+data_combined_hla_only %>% dplyr::filter(Sample %in% "B86T15")
+
+data_combined_hla_only %>% dplyr::filter(Sample %in% c("B86T14", "B86T17"))
+data_combined_hla_only %>% dplyr::filter(Sample %in% "B73T40")
+
 ```
 
 

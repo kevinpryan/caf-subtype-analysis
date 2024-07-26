@@ -37,6 +37,8 @@ library(vroom)
 library(sva)
 library(dplyr)
 library(stringr)
+library(forcats)
+library(ggplot2)
 ```
 
 ### Convert command-line arguments to variables
@@ -256,17 +258,17 @@ dds_gtex_only <- DESeqDataSetFromMatrix(gtex_in_not_dup_ord[,-ncol(gtex_in_not_d
 ```
 
 ```{r}
-pca_before_correction <- plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd)) + 
+pca_before_correction <- DESeq2::plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd)) + 
   theme(panel.background = element_blank(),
-        axis.line = element_line(colour = "black")) +
+        axis.line = element_line(colour = "black"),
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold")) +
 labs(colour = "Study")  +
-  ggtitle("PCA biplot before batch correction") +
-    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+  ggtitle("PCA biplot before batch correction") 
 ```
 
 ```{r}
 pca_before_correction
-ggsave(pca_before_correction, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_original_by_study.png")
+#ggsave(pca_before_correction, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_original_by_study.png")
 ```
 
 ```{r plots gtex only}
@@ -407,7 +409,7 @@ plot_out
 data3 <- data2[order(data2$Sample_Site),]
 data_norm <- data2 %>% dplyr::filter(Sample_Site == "normal_tissue")
 data_tumor <- data2 %>% dplyr::filter(Sample_Site == "tumor")
-# data_jt <- data2 %>% dplyr::filter(Sample_Site == "juxtatumor")
+data_jt <- data2 %>% dplyr::filter(Sample_Site == "juxtatumor")
 data4 <- rbind.data.frame(data_norm, data_tumor, data_jt)
 plot_out <- ggplot(data4, aes(PC1, PC2, color = Sample_Site)) +
                                 #factor(Sample_Site, levels = c(2,1,0)))) +   
@@ -420,7 +422,7 @@ plot_out
 ```
 
 ```{r}
-ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_nucleic_acid_isolation.png")
+#ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_nucleic_acid_isolation.png")
 ```
 
 ```{r}
@@ -432,7 +434,7 @@ plot_bc_sex <- ggplot(data4, aes(PC1, PC2, color = SEX)) +
   ggtitle("PCA biplot batch-corrected\n Nucleic acid isolation batch limma\nby sex")#+
   #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
 plot_bc_sex
-ggsave(plot_bc_sex, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_sex.png")
+#ggsave(plot_bc_sex, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_sex.png")
 
 plot_bc_age <- ggplot(data4, aes(PC1, PC2, color = Under_50)) +
                                 #factor(Sample_Site, levels = c(2,1,0)))) +   
@@ -442,7 +444,7 @@ plot_bc_age <- ggplot(data4, aes(PC1, PC2, color = Under_50)) +
   ggtitle("PCA biplot batch-corrected\n Nucleic acid isolation batch limma\nby age")#+
   #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
 plot_bc_age
-ggsave(plot_bc_age, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_age.png")
+#ggsave(plot_bc_age, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_age.png")
 ```
 
 ```{r}
@@ -473,7 +475,7 @@ plot_out <- ggplot(data2, aes(PC1, PC2, color = Sample_Site)) +
   ggtitle("PCA biplot batch-corrected\n GTEx Inhouse batch limma")#+
   #scale_fill_manual(values = c("1" = "#00BFC4", "0" = "#F8766D", "2" = "purple"))
 plot_out
-ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_gtex_inhouse_batch.png")
+#ggsave(plot_out, filename = "~/Documents/PhD/subtypes/caf-subtype-analysis/gtex_comparison/results/pca_batch_corrected_gtex_inhouse_batch.png")
 
 ```
 

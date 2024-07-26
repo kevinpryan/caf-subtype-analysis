@@ -2,7 +2,9 @@
 title: "Immunedeconv"
 author: "Kevin Ryan"
 date: "2023-05-08"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -11,11 +13,17 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## R Markdown
 
-```{r}
+```{r, message=FALSE}
 library(biomaRt)
 library(immunedeconv)
 library(corrplot)
 library(forcats)
+library(stringr)
+library(here)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
 ```
 
 ```{r}
@@ -71,6 +79,11 @@ tx2gene <- read.table(tx2gene_path, header = T)
 ```
 
 ```{r}
+salmon_tpm_in[1:5,1:5]
+```
+
+
+```{r}
 salmon_tpm_hgnc <- convert_ensg_version_to_hgnc_df_rownames(salmon_tpm_in)
 salmon_tpm_hgnc_not_duplicated <- salmon_tpm_hgnc[!duplicated(salmon_tpm_hgnc$gene_name),]
 salmon_tpm_hgnc_not_duplicated_hgnc_col <-  subset(salmon_tpm_hgnc_not_duplicated, select = -c(gene_id) )
@@ -104,6 +117,7 @@ deconvolution_mcp <- immunedeconv::deconvolute(salmon_tpm_hgnc_not_duplicated, "
 ```{r}
 deconvolution_mcp_filtered_long <- deconvolution_mcp %>% dplyr::filter(cell_type %in% c("Cancer associated fibroblast", "Endothelial cell")) %>% pivot_longer(!cell_type, names_to = "sample", values_to = "mcp_score")
 deconvolution_mcp_filtered_long_metadata <- full_join(deconvolution_mcp_filtered_long, metadata)
+
 ```
 
 ```{r}
@@ -684,21 +698,22 @@ metadata_markers <- full_join(metadata, salmon_markers)
 
 
 ```{r}
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/xcell_deconv_caf.svg")
-xcell_plot
-dev.off()
+# svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/xcell_deconv_caf.svg")
+# xcell_plot
+# dev.off()
 ```
-
+#
+#
+```{r}
+#svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/epic_deconv_caf_stack.svg")
+# epic_plot_stack
+# dev.off()
+```
+#
 
 ```{r}
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/epic_deconv_caf_stack.svg")
-epic_plot_stack
-dev.off()
-```
-
-```{r}
-svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/mcp_deconv_caf.svg")
-mcp_plot
-dev.off()
+# svg("/home/rstudio/Documents/PhD/notes/mini_viva_report/images/current_research/figure3/mcp_deconv_caf.svg")
+# mcp_plot
+# dev.off()
 ```
 
