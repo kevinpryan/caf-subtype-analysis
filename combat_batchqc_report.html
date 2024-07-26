@@ -1,0 +1,1585 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <meta name="generator" content="pandoc" />
+  <meta name="date" content="2023-06-26" />
+  <title>BatchQC Report</title>
+  <style type="text/css">code{white-space: pre;}</style>
+  <link rel="stylesheet" href="/usr/local/lib/R/site-library/rmarkdown/rmarkdown/templates/html_vignette/resources/vignette.css" type="text/css" />
+  <style type="text/css">body{max-width: 100%;}</style>
+  <script src="libs/header-attrs-2.22/header-attrs.js"></script>
+
+<link href="libs/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+<link href="libs/bootstrap/css/bootstrap-responsive.min.css" rel="stylesheet" media="screen">
+<link href="libs/bootstrap/css/user.css" rel="stylesheet" media="screen">
+</head>
+<body data-spy="scroll" data-target=".sidebar" data-offset="50">
+	<div id="wrap">
+		<header class="subhead" id="topheader">
+			<div class="container">
+				<h1>BatchQC Report</h1>
+				<p class="lead">
+					Tests for checking Batch Effects
+				</p>
+			</div>
+		</header>
+
+		<div class="container">
+			<div class="row">
+
+				<div class="span3 sidebar">
+
+					<div class="affixdiv" data-spy="affix" data-offset-top="400" data-clampedwidth=".sidebar">
+						<div class="well" style="padding: 8px 0;">
+							<ul class="nav nav-list usermenu">
+								<li class="nav-header">Contents</li>
+								<li class="active"><a href="#topheader"><i class="icon-bullhorn  icon-white"></i> BatchQC Report </a></li>
+<ul>
+<li><a href="#summary" id="toc-summary">Summary</a>
+<ul>
+<li><a href="#confounding" id="toc-confounding">Confounding</a></li>
+<li><a href="#variation-analysis" id="toc-variation-analysis">Variation
+Analysis</a></li>
+<li><a href="#p-value-analysis" id="toc-p-value-analysis">P-value
+Analysis</a></li>
+</ul></li>
+<li><a href="#differential-expression"
+id="toc-differential-expression">Differential Expression</a>
+<ul>
+<li><a href="#expression-plot" id="toc-expression-plot">Expression
+Plot</a></li>
+<li><a href="#limma" id="toc-limma">LIMMA</a></li>
+</ul></li>
+<li><a href="#median-correlations" id="toc-median-correlations">Median
+Correlations</a></li>
+<li><a href="#heatmaps" id="toc-heatmaps">Heatmaps</a>
+<ul>
+<li><a href="#heatmap" id="toc-heatmap">Heatmap</a></li>
+<li><a href="#sample-correlations" id="toc-sample-correlations">Sample
+Correlations</a></li>
+</ul></li>
+<li><a href="#circular-dendrogram" id="toc-circular-dendrogram">Circular
+Dendrogram</a></li>
+<li><a href="#pca-principal-component-analysis"
+id="toc-pca-principal-component-analysis">PCA: Principal Component
+Analysis</a>
+<ul>
+<li><a href="#pca" id="toc-pca">PCA</a></li>
+<li><a href="#explained-variation"
+id="toc-explained-variation">Explained Variation</a></li>
+</ul></li>
+<li><a href="#shape" id="toc-shape">Shape</a></li>
+<li><a href="#combat-plots" id="toc-combat-plots">Combat Plots</a></li>
+<li><a href="#sva" id="toc-sva">SVA</a>
+<ul>
+<li><a href="#summary-1" id="toc-summary-1">Summary</a></li>
+</ul></li>
+</ul>
+							</ul>
+						</div>
+					</div>
+
+				</div>
+<div id="header">
+<h1 class="title">BatchQC Report</h1>
+<h3 class="date">2023-06-26</h3>
+</div>
+<!--
+<div id="TOC">
+<ul>
+<li><a href="#summary" id="toc-summary">Summary</a>
+<ul>
+<li><a href="#confounding" id="toc-confounding">Confounding</a></li>
+<li><a href="#variation-analysis" id="toc-variation-analysis">Variation
+Analysis</a></li>
+<li><a href="#p-value-analysis" id="toc-p-value-analysis">P-value
+Analysis</a></li>
+</ul></li>
+<li><a href="#differential-expression"
+id="toc-differential-expression">Differential Expression</a>
+<ul>
+<li><a href="#expression-plot" id="toc-expression-plot">Expression
+Plot</a></li>
+<li><a href="#limma" id="toc-limma">LIMMA</a></li>
+</ul></li>
+<li><a href="#median-correlations" id="toc-median-correlations">Median
+Correlations</a></li>
+<li><a href="#heatmaps" id="toc-heatmaps">Heatmaps</a>
+<ul>
+<li><a href="#heatmap" id="toc-heatmap">Heatmap</a></li>
+<li><a href="#sample-correlations" id="toc-sample-correlations">Sample
+Correlations</a></li>
+</ul></li>
+<li><a href="#circular-dendrogram" id="toc-circular-dendrogram">Circular
+Dendrogram</a></li>
+<li><a href="#pca-principal-component-analysis"
+id="toc-pca-principal-component-analysis">PCA: Principal Component
+Analysis</a>
+<ul>
+<li><a href="#pca" id="toc-pca">PCA</a></li>
+<li><a href="#explained-variation"
+id="toc-explained-variation">Explained Variation</a></li>
+</ul></li>
+<li><a href="#shape" id="toc-shape">Shape</a></li>
+<li><a href="#combat-plots" id="toc-combat-plots">Combat Plots</a></li>
+<li><a href="#sva" id="toc-sva">SVA</a>
+<ul>
+<li><a href="#summary-1" id="toc-summary-1">Summary</a></li>
+</ul></li>
+</ul>
+</div>
+-->
+<div class="span9 content">
+<div id="summary" class="section level1">
+<h1>Summary</h1>
+<div id="confounding" class="section level2">
+<h2>Confounding</h2>
+<div id="number-of-samples-in-each-batch-and-condition"
+class="section level3">
+<h3>Number of samples in each Batch and Condition</h3>
+<table style="width:86%;">
+<colgroup>
+<col width="25%" />
+<col width="19%" />
+<col width="19%" />
+<col width="22%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center"> </th>
+<th align="center">Batch hiseq</th>
+<th align="center">Batch miseq</th>
+<th align="center">Batch novaseq</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center"><strong>Condition 1</strong></td>
+<td align="center">82</td>
+<td align="center">24</td>
+<td align="center">7</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="measures-of-confounding-between-batch-and-condition"
+class="section level3">
+<h3>Measures of confounding between Batch and Condition</h3>
+<table style="width:99%;">
+<colgroup>
+<col width="44%" />
+<col width="36%" />
+<col width="18%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center"> </th>
+<th align="center">Standardized Pearson Correlation Coefficient</th>
+<th align="center">Cramer’s V</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center"><strong>Confounding Coefficients (0=no confounding,
+1=complete confounding)</strong></td>
+<td align="center">NA</td>
+<td align="center">NA</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="variation-analysis" class="section level2">
+<h2>Variation Analysis</h2>
+<div id="variation-explained-by-batch-and-condition"
+class="section level3">
+<h3>Variation explained by Batch and Condition</h3>
+<p><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-4-1.png" /><!-- --></p>
+<table style="width:83%;">
+<colgroup>
+<col width="19%" />
+<col width="34%" />
+<col width="16%" />
+<col width="12%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center"> </th>
+<th align="center">Full (Condition+Batch)</th>
+<th align="center">Condition</th>
+<th align="center">Batch</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center"><strong>Min.</strong></td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">0</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>1st Qu.</strong></td>
+<td align="center">0.015</td>
+<td align="center">0</td>
+<td align="center">0.015</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>Median</strong></td>
+<td align="center">0.033</td>
+<td align="center">0</td>
+<td align="center">0.033</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>Mean</strong></td>
+<td align="center">0.1957</td>
+<td align="center">0</td>
+<td align="center">0.1957</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>3rd Qu.</strong></td>
+<td align="center">0.067</td>
+<td align="center">0</td>
+<td align="center">0.067</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>Max.</strong></td>
+<td align="center">25.39</td>
+<td align="center">0</td>
+<td align="center">25.39</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="p-value-analysis" class="section level2">
+<h2>P-value Analysis</h2>
+<div
+id="distribution-of-batch-and-condition-effect-p-values-across-genes"
+class="section level3">
+<h3>Distribution of Batch and Condition Effect p-values Across
+Genes</h3>
+<table>
+<colgroup>
+<col width="26%" />
+<col width="12%" />
+<col width="10%" />
+<col width="9%" />
+<col width="9%" />
+<col width="10%" />
+<col width="7%" />
+<col width="11%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center"> </th>
+<th align="center">Min.</th>
+<th align="center">1st Qu.</th>
+<th align="center">Median</th>
+<th align="center">Mean</th>
+<th align="center">3rd Qu.</th>
+<th align="center">Max.</th>
+<th align="center">Ps&lt;0.05</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center"><strong>Batch P-values</strong></td>
+<td align="center">1.007e-07</td>
+<td align="center">0.9639</td>
+<td align="center">0.9821</td>
+<td align="center">0.9303</td>
+<td align="center">0.9917</td>
+<td align="center">1</td>
+<td align="center">0.003873</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>Condition P-values</strong></td>
+<td align="center">1</td>
+<td align="center">1</td>
+<td align="center">1</td>
+<td align="center">1</td>
+<td align="center">1</td>
+<td align="center">1</td>
+<td align="center">0</td>
+</tr>
+</tbody>
+</table>
+<p><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-7-1.png" /><!-- --></p>
+<p><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-8-1.png" /><!-- --></p>
+</div>
+</div>
+</div>
+<div id="differential-expression" class="section level1">
+<h1>Differential Expression</h1>
+<div id="expression-plot" class="section level2">
+<h2>Expression Plot</h2>
+<p>Boxplots for all values for each of the samples and are colored by
+batch membership.</p>
+<p><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-10-1.png" /><!-- --></p>
+</div>
+<div id="limma" class="section level2">
+<h2>LIMMA</h2>
+</div>
+</div>
+<div id="median-correlations" class="section level1">
+<h1>Median Correlations</h1>
+<p>This plot helps identify outlying samples. <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-13-1.png" /><!-- --></p>
+</div>
+<div id="heatmaps" class="section level1">
+<h1>Heatmaps</h1>
+<div id="heatmap" class="section level2">
+<h2>Heatmap</h2>
+<p>This is a heatmap of the given data matrix showing the batch effects
+and variations with different conditions. <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-15-1.png" /><!-- --></p>
+</div>
+<div id="sample-correlations" class="section level2">
+<h2>Sample Correlations</h2>
+<p>This is a heatmap of the correlation between samples. <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-16-1.png" /><!-- --></p>
+</div>
+</div>
+<div id="circular-dendrogram" class="section level1">
+<h1>Circular Dendrogram</h1>
+<p>This is a Circular Dendrogram of the given data matrix colored by
+batch to show the batch effects. <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-18-1.png" /><!-- --></p>
+</div>
+<div id="pca-principal-component-analysis" class="section level1">
+<h1>PCA: Principal Component Analysis</h1>
+<div id="pca" class="section level2">
+<h2>PCA</h2>
+<p>This is a plot of the top two principal components colored by batch
+to show the batch effects. <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-20-1.png" /><!-- --></p>
+</div>
+<div id="explained-variation" class="section level2">
+<h2>Explained Variation</h2>
+<table style="width:100%;">
+<colgroup>
+<col width="5%" />
+<col width="12%" />
+<col width="11%" />
+<col width="14%" />
+<col width="14%" />
+<col width="11%" />
+<col width="14%" />
+<col width="14%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center"> </th>
+<th align="center">Proportion of Variance (%)</th>
+<th align="center">Cumulative Proportion of Variance (%)</th>
+<th align="center">Percent Variation Explained by Either Condition or
+Batch</th>
+<th align="center">Percent Variation Explained by Condition</th>
+<th align="center">Condition Significance (p-value)</th>
+<th align="center">Percent Variation Explained by Batch</th>
+<th align="center">Batch Significance (p-value)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center"><strong>PC1</strong></td>
+<td align="center">9.765</td>
+<td align="center">9.765</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8565</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC2</strong></td>
+<td align="center">5.13</td>
+<td align="center">14.89</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9624</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC3</strong></td>
+<td align="center">3.758</td>
+<td align="center">18.65</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9851</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC4</strong></td>
+<td align="center">3.152</td>
+<td align="center">21.81</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9734</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC5</strong></td>
+<td align="center">2.825</td>
+<td align="center">24.63</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8387</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC6</strong></td>
+<td align="center">2.761</td>
+<td align="center">27.39</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9981</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC7</strong></td>
+<td align="center">2.437</td>
+<td align="center">29.83</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9398</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC8</strong></td>
+<td align="center">2.247</td>
+<td align="center">32.08</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9834</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC9</strong></td>
+<td align="center">2.092</td>
+<td align="center">34.17</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9573</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC10</strong></td>
+<td align="center">2.011</td>
+<td align="center">36.18</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9984</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC11</strong></td>
+<td align="center">1.955</td>
+<td align="center">38.13</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9891</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC12</strong></td>
+<td align="center">1.86</td>
+<td align="center">40</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9979</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC13</strong></td>
+<td align="center">1.824</td>
+<td align="center">41.82</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9916</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC14</strong></td>
+<td align="center">1.713</td>
+<td align="center">43.53</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9948</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC15</strong></td>
+<td align="center">1.663</td>
+<td align="center">45.2</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9977</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC16</strong></td>
+<td align="center">1.616</td>
+<td align="center">46.81</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9652</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC17</strong></td>
+<td align="center">1.6</td>
+<td align="center">48.41</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9825</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC18</strong></td>
+<td align="center">1.557</td>
+<td align="center">49.97</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9967</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC19</strong></td>
+<td align="center">1.494</td>
+<td align="center">51.46</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9955</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC20</strong></td>
+<td align="center">1.447</td>
+<td align="center">52.91</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9895</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC21</strong></td>
+<td align="center">1.392</td>
+<td align="center">54.3</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9977</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC22</strong></td>
+<td align="center">1.326</td>
+<td align="center">55.63</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9733</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC23</strong></td>
+<td align="center">1.298</td>
+<td align="center">56.93</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9964</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC24</strong></td>
+<td align="center">1.276</td>
+<td align="center">58.2</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9233</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC25</strong></td>
+<td align="center">1.213</td>
+<td align="center">59.41</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9918</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC26</strong></td>
+<td align="center">1.169</td>
+<td align="center">60.58</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9852</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC27</strong></td>
+<td align="center">1.136</td>
+<td align="center">61.72</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9855</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC28</strong></td>
+<td align="center">1.128</td>
+<td align="center">62.85</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9662</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC29</strong></td>
+<td align="center">1.109</td>
+<td align="center">63.96</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9575</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC30</strong></td>
+<td align="center">1.092</td>
+<td align="center">65.05</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9556</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC31</strong></td>
+<td align="center">1.05</td>
+<td align="center">66.1</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9859</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC32</strong></td>
+<td align="center">1.016</td>
+<td align="center">67.12</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9968</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC33</strong></td>
+<td align="center">0.9448</td>
+<td align="center">68.06</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9516</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC34</strong></td>
+<td align="center">0.9287</td>
+<td align="center">68.99</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.9164</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC35</strong></td>
+<td align="center">0.9141</td>
+<td align="center">69.9</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.9168</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC36</strong></td>
+<td align="center">0.8954</td>
+<td align="center">70.8</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9813</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC37</strong></td>
+<td align="center">0.8819</td>
+<td align="center">71.68</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9762</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC38</strong></td>
+<td align="center">0.8558</td>
+<td align="center">72.54</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9827</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC39</strong></td>
+<td align="center">0.838</td>
+<td align="center">73.37</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9841</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC40</strong></td>
+<td align="center">0.7986</td>
+<td align="center">74.17</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9604</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC41</strong></td>
+<td align="center">0.775</td>
+<td align="center">74.95</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9864</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC42</strong></td>
+<td align="center">0.7442</td>
+<td align="center">75.69</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9856</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC43</strong></td>
+<td align="center">0.7393</td>
+<td align="center">76.43</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.9149</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC44</strong></td>
+<td align="center">0.706</td>
+<td align="center">77.14</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9917</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC45</strong></td>
+<td align="center">0.6848</td>
+<td align="center">77.82</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9611</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC46</strong></td>
+<td align="center">0.6788</td>
+<td align="center">78.5</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9972</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC47</strong></td>
+<td align="center">0.658</td>
+<td align="center">79.16</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9944</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC48</strong></td>
+<td align="center">0.6416</td>
+<td align="center">79.8</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9981</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC49</strong></td>
+<td align="center">0.624</td>
+<td align="center">80.42</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9889</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC50</strong></td>
+<td align="center">0.6129</td>
+<td align="center">81.04</td>
+<td align="center">0.7</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.7</td>
+<td align="center">0.6978</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC51</strong></td>
+<td align="center">0.5914</td>
+<td align="center">81.63</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9596</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC52</strong></td>
+<td align="center">0.5827</td>
+<td align="center">82.21</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9396</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC53</strong></td>
+<td align="center">0.5761</td>
+<td align="center">82.79</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9923</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC54</strong></td>
+<td align="center">0.5433</td>
+<td align="center">83.33</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9781</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC55</strong></td>
+<td align="center">0.5367</td>
+<td align="center">83.87</td>
+<td align="center">0.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.4</td>
+<td align="center">0.7858</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC56</strong></td>
+<td align="center">0.524</td>
+<td align="center">84.39</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9383</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC57</strong></td>
+<td align="center">0.5093</td>
+<td align="center">84.9</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.8925</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC58</strong></td>
+<td align="center">0.5021</td>
+<td align="center">85.4</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9952</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC59</strong></td>
+<td align="center">0.4821</td>
+<td align="center">85.88</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8257</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC60</strong></td>
+<td align="center">0.4776</td>
+<td align="center">86.36</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9282</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC61</strong></td>
+<td align="center">0.4731</td>
+<td align="center">86.84</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9909</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC62</strong></td>
+<td align="center">0.4698</td>
+<td align="center">87.31</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9987</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC63</strong></td>
+<td align="center">0.459</td>
+<td align="center">87.76</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.9205</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC64</strong></td>
+<td align="center">0.4501</td>
+<td align="center">88.21</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9986</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC65</strong></td>
+<td align="center">0.4405</td>
+<td align="center">88.65</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9992</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC66</strong></td>
+<td align="center">0.4152</td>
+<td align="center">89.07</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9886</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC67</strong></td>
+<td align="center">0.4029</td>
+<td align="center">89.47</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9974</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC68</strong></td>
+<td align="center">0.4008</td>
+<td align="center">89.87</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9851</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC69</strong></td>
+<td align="center">0.3849</td>
+<td align="center">90.26</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9932</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC70</strong></td>
+<td align="center">0.3782</td>
+<td align="center">90.64</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9993</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC71</strong></td>
+<td align="center">0.359</td>
+<td align="center">91</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9518</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC72</strong></td>
+<td align="center">0.3545</td>
+<td align="center">91.35</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9477</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC73</strong></td>
+<td align="center">0.3462</td>
+<td align="center">91.7</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9536</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC74</strong></td>
+<td align="center">0.3394</td>
+<td align="center">92.04</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.8795</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC75</strong></td>
+<td align="center">0.3364</td>
+<td align="center">92.37</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9725</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC76</strong></td>
+<td align="center">0.3287</td>
+<td align="center">92.7</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9987</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC77</strong></td>
+<td align="center">0.3251</td>
+<td align="center">93.03</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9971</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC78</strong></td>
+<td align="center">0.3139</td>
+<td align="center">93.34</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9929</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC79</strong></td>
+<td align="center">0.3096</td>
+<td align="center">93.65</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8571</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC80</strong></td>
+<td align="center">0.3042</td>
+<td align="center">93.95</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9795</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC81</strong></td>
+<td align="center">0.2924</td>
+<td align="center">94.25</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9981</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC82</strong></td>
+<td align="center">0.2846</td>
+<td align="center">94.53</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9758</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC83</strong></td>
+<td align="center">0.2759</td>
+<td align="center">94.81</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9993</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC84</strong></td>
+<td align="center">0.2704</td>
+<td align="center">95.08</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9895</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC85</strong></td>
+<td align="center">0.2681</td>
+<td align="center">95.35</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9653</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC86</strong></td>
+<td align="center">0.2608</td>
+<td align="center">95.61</td>
+<td align="center">0.5</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.5</td>
+<td align="center">0.7755</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC87</strong></td>
+<td align="center">0.2567</td>
+<td align="center">95.86</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9732</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC88</strong></td>
+<td align="center">0.2444</td>
+<td align="center">96.11</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9763</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC89</strong></td>
+<td align="center">0.2341</td>
+<td align="center">96.34</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8602</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC90</strong></td>
+<td align="center">0.228</td>
+<td align="center">96.57</td>
+<td align="center">0.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.4</td>
+<td align="center">0.8146</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC91</strong></td>
+<td align="center">0.2203</td>
+<td align="center">96.79</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9611</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC92</strong></td>
+<td align="center">0.2162</td>
+<td align="center">97.01</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9625</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC93</strong></td>
+<td align="center">0.2022</td>
+<td align="center">97.21</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8634</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC94</strong></td>
+<td align="center">0.2011</td>
+<td align="center">97.41</td>
+<td align="center">0</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0</td>
+<td align="center">0.9891</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC95</strong></td>
+<td align="center">0.1957</td>
+<td align="center">97.61</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8388</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC96</strong></td>
+<td align="center">0.1876</td>
+<td align="center">97.79</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.957</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC97</strong></td>
+<td align="center">0.1843</td>
+<td align="center">97.98</td>
+<td align="center">0.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.4</td>
+<td align="center">0.8103</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC98</strong></td>
+<td align="center">0.1825</td>
+<td align="center">98.16</td>
+<td align="center">0.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.4</td>
+<td align="center">0.7895</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC99</strong></td>
+<td align="center">0.1732</td>
+<td align="center">98.33</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8657</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC100</strong></td>
+<td align="center">0.1652</td>
+<td align="center">98.5</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.9012</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC101</strong></td>
+<td align="center">0.1618</td>
+<td align="center">98.66</td>
+<td align="center">0.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.3</td>
+<td align="center">0.8269</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC102</strong></td>
+<td align="center">0.1611</td>
+<td align="center">98.82</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9375</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC103</strong></td>
+<td align="center">0.1525</td>
+<td align="center">98.97</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.8933</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC104</strong></td>
+<td align="center">0.1479</td>
+<td align="center">99.12</td>
+<td align="center">1.3</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">1.3</td>
+<td align="center">0.4878</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC105</strong></td>
+<td align="center">0.1467</td>
+<td align="center">99.27</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9502</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC106</strong></td>
+<td align="center">0.1437</td>
+<td align="center">99.41</td>
+<td align="center">0.1</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.1</td>
+<td align="center">0.9726</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC107</strong></td>
+<td align="center">0.1359</td>
+<td align="center">99.55</td>
+<td align="center">0.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.2</td>
+<td align="center">0.918</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC108</strong></td>
+<td align="center">0.1301</td>
+<td align="center">99.68</td>
+<td align="center">0.6</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.6</td>
+<td align="center">0.7203</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC109</strong></td>
+<td align="center">0.1105</td>
+<td align="center">99.79</td>
+<td align="center">1.2</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">1.2</td>
+<td align="center">0.5272</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC110</strong></td>
+<td align="center">0.09857</td>
+<td align="center">99.89</td>
+<td align="center">2.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">2.4</td>
+<td align="center">0.2587</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC111</strong></td>
+<td align="center">0.09193</td>
+<td align="center">99.98</td>
+<td align="center">85.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">85.4</td>
+<td align="center">0</td>
+</tr>
+<tr class="even">
+<td align="center"><strong>PC112</strong></td>
+<td align="center">0.0214</td>
+<td align="center">100</td>
+<td align="center">98.8</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">98.8</td>
+<td align="center">0</td>
+</tr>
+<tr class="odd">
+<td align="center"><strong>PC113</strong></td>
+<td align="center">1.926e-30</td>
+<td align="center">100</td>
+<td align="center">0.4</td>
+<td align="center">0</td>
+<td align="center">1</td>
+<td align="center">0.4</td>
+<td align="center">0.8035</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="shape" class="section level1">
+<h1>Shape</h1>
+<p>This is a heatmap plot showing the variation of gene expression mean,
+variance, skewness and kurtosis between samples grouped by batch to see
+the batch effects variation <img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-23-1.png" /><!-- --></p>
+<pre><code>## Note: Sample-wise p-value is calculated for the variation across samples on the measure across genes. Gene-wise p-value is calculated for the variation of each gene between batches on the measure across each batch. If the data is quantum normalized, then the Sample-wise measure across genes is same for all samples and Gene-wise p-value is a good measure.</code></pre>
+</div>
+<div id="combat-plots" class="section level1">
+<h1>Combat Plots</h1>
+<p>This is a plot showing whether parametric or non-parameteric prior is
+appropriate for this data. It also shows the Kolmogorov-Smirnov test
+comparing the parametric and non-parameteric prior distribution.</p>
+<pre><code>## Found 3 batches
+## Adjusting for 0 covariate(s) or covariate level(s)
+## Standardizing Data across genes
+## Fitting L/S model and finding priors</code></pre>
+<p><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-25-1.png" /><!-- --><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-25-2.png" /><!-- --><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-25-3.png" /><!-- --><img
+src="combat_batchqc_report_files/figure-html/unnamed-chunk-25-4.png" /><!-- --></p>
+<pre><code>## Batch mean distribution across genes: Normal vs Empirical distribution
+## Two-sided Kolmogorov-Smirnov test
+## Selected Batch: 1
+## Statistic D = 0.1797
+## p-value = 0
+## 
+## 
+## Batch Variance distribution across genes: Inverse Gamma vs Empirical distribution
+## Two-sided Kolmogorov-Smirnov test
+## Selected Batch: 1
+## Statistic D = 0.1335
+## p-value = 0Note: The non-parametric version of ComBat takes much longer time to run and we recommend it only when the shape of the non-parametric curve widely differs such as a bimodal or highly skewed distribution. Otherwise, the difference in batch adjustment is very negligible and parametric version is recommended even if p-value of KS test above is significant.</code></pre>
+</div>
+<div id="sva" class="section level1">
+<h1>SVA</h1>
+<div id="summary-1" class="section level2">
+<h2>Summary</h2>
+<pre><code>## Number of Surrogate Variables found in the given data: 2</code></pre>
+</div>
+</div>
+</div>
+     </div>
+   </div>
+  </div>
+   <!-- FOOTER  -->
+   <div id="footer">
+		<div class="container">
+			<p class="muted credit">Questions? Kindly contact <code>Solaiappan Manimaran</code> <a href="mailto:mani2012@bu.edu?subject=BatchQC question"><code>mani2012 [at] bu.edu</code></a> using the subject heading <code>BatchQC question</code>. </p>
+		</div>
+	</div>
+
+	<script src="libs/bootstrap/javascript/jquery-1.10.1.min.js"></script>
+	<script src="libs/bootstrap/javascript/bootstrap.min.js"></script>
+	<script src="libs/bootstrap/javascript/user.js"></script>
+  <script>
+  $( "ul" ).addClass( "nav nav-list usermenu" );
+  </script>
+
+</body>
+</html>

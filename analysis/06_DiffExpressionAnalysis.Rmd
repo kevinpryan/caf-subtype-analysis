@@ -1,0 +1,497 @@
+---
+title: "Differential expression analysis"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=F}
+library(DESeq2)
+library(sva)
+library(PCAtools)
+library(IHW)
+library(biomaRt)
+library(dplyr)
+```
+
+```{r Functions, echo=F}
+filter_out_low_expressed <- function(dds){
+  print(paste("no of genes before filtering...", nrow(dds)))
+  # returns a vector of whether the total count of each gene is >= 10 (True or false)
+  keep <- rowSums(counts(dds)) >= 10
+  # only keep rows (genes) for which keep is TRUE
+  dds <- dds[keep,]
+  # at least X samples with a count of 10 or more, where X is 5% of samples
+  X <- round(0.05*ncol(dds))
+  keep <- rowSums(counts(dds) >= 10) >= X
+  dds <- dds[keep,]
+  print(paste("no of genes after filtering...", nrow(dds)))
+  return(dds)
+}
+
+
+```
+
+```{r}
+##tx2gene_file <- "~/Documents/PhD/subtypes/caf-subtype-analysis/nf-subpop/outdir/tx2gene/tx2gene.txt"
+
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+                #host="https://uswest.ensembl.org")
+
+ensembl.version.2.hgnc <- getBM(attributes = c("ensembl_gene_id_version", "ensembl_gene_id", "hgnc_symbol", "entrezgene_id"), mart = mart, useCache = FALSE)
+ensembl.version.2.hgnc
+genes.interest <- c("WT1", "SLC7A2", "GPR37", "ADGRF5", "PCDH10")
+gene.interest.ensg.version <- ensembl.version.2.hgnc[which(ensembl.version.2.hgnc$hgnc_symbol == genes.interest),]
+```
+
+## Differential expression analysis
+
+Here, differential expression analysis was carried out using the batch-corrected data. Usually, this is not recommended - it is recommended to include batch as a covariate when fitting the linear model for DE analysis rather than batch-correcting the data. However, as one of the batches matches up completely with one of the CAF subpopulations (CAF S3 - EGAD00001004810), this approach is not possible.
+
+DOING DE ANALYSIS ON THE BATCH CORRECTED DATA IS NOT THE APPROACH I AM GOING WITH
+### ENSG gene symbol version
+
+#### Data cleaning
+
+```{r Read in batch corrected data ENSG and remove inhouse data as subpopulation is unknown}
+dds.ensg.remove.outliers.batch.corrected <- readRDS("../intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-07.Rds")
+keep <- which(colData(dds.ensg.remove.outliers.batch.corrected)$Subpopulation != "Unknown")
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- dds.ensg.remove.outliers.batch.corrected[,keep]
+```
+
+```{r Filter out lowly expressed genes ENSG}
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)$Subpopulation)
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- filter_out_low_expressed(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+```{r}
+vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse <- vst(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+plotPCA(vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse, ntop = nrow(vst.dds.ensg.remove.outliers.batch.corrected.no.inhouse), intgroup = "Subpopulation")
+```
+
+#### DE analysis
+
+```{r}
+design(dds.ensg.remove.outliers.batch.corrected.no.inhouse) <- ~ Tumor_JuxtaTumor + Subpopulation
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+```{r Define model matrix}
+# define model matrix
+mod_mat <- model.matrix(design(dds.ensg.remove.outliers.batch.corrected.no.inhouse), colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation == "S1",])
+S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation == "S3",])
+S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation == "S4",])
+not_S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation %in% c("S3", "S4"),])
+not_S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation %in% c("S1", "S4"),])
+not_S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation %in% c("S1", "S3"),])
+```
+
+From the DESeq2 paper (thanks to Dónal for pointing it out) - the default null hypothesis with the `results` function is that the actual log fold change is exactly zero. This is not likely to be biologically significant. What we often do is extract genes with a lfc greater than a certain threshold, e.g. LFC >=2. However, there is a better way of doing this. We can incorporate our threshold into the test itself, i.e. we can test if the actual LFC is greater than or equal to 2, and then our adjusted P-values will be with respect to this new null hypothesis. 
+
+```{r Extract results for each pairwise contrast}
+res_not_S1 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.1, lfcThreshold = 1)
+res_not_S3 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.1, lfcThreshold = 1)
+res_not_S4 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S4 - not_S4, filterFun = ihw, alpha = 0.1, lfcThreshold = 1)
+```
+
+```{r}
+length(which(res_not_S4$padj < 0.1))
+hist(res_not_S1$padj)
+hist(res_not_S3$padj)
+hist(res_not_S4$padj)
+```
+
+Try combining S1 and S3
+
+```{r}
+S1_S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation %in% c("S1","S3"),])
+S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation == "S4",])
+```
+
+```{r Extract results for the contrast}
+#res_S1_S3 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S1_S3 - S4, filterFun = ihw, alpha = 0.1, lfcThreshold = 1)
+#res_S4 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S4 - S1_S3, filterFun = ihw, alpha = 0.1, lfcThreshold = 1)
+res_S1_S3 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S1_S3 - S4, altHypothesis = "greater", lfcThreshold = 2)
+res_S4 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = S4 -S1_S3, altHypothesis = "greater", lfcThreshold = 2)
+
+resultsNames(res_S1_S3)
+```
+
+```{r}
+hist(res_S1_S3$pvalue)
+length(which(res_S1_S3$padj < 0.1))
+hist(res_S4$pvalue)
+length(which(res_S4$padj < 0.1))
+```
+
+
+```{r}
+dds.ensg.remove.outliers.batch.corrected.no.inhouse$Is_S4 <- factor(dds.ensg.remove.outliers.batch.corrected.no.inhouse$Subpopulation == "S4")
+colData(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+```{r}
+design(dds.ensg.remove.outliers.batch.corrected.no.inhouse) <- ~ Tumor_JuxtaTumor + Is_S4
+dds.ensg.remove.outliers.batch.corrected.no.inhouse <- DESeq(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+```
+
+```{r}
+resultsNames(dds.ensg.remove.outliers.batch.corrected.no.inhouse)
+res_is_s4 <- results(dds.ensg.remove.outliers.batch.corrected.no.inhouse, contrast = list("Is_S4_TRUE_vs_FALSE"), filterFun = ihw, alpha = 0.1, lfcThreshold = 2)
+hist(res_is_s4$pvalue)
+length(res_is_s4$padj)
+res_is_s4
+```
+
+### Try differential expression analysis on non batch-corrected data using surrogate variables as covariates
+
+```{r}
+# commented out on 20230516
+# dds.ensg.remove.outliers.no.inhouse <- readRDS("../intermediate_files/dds_not_corrected_remove_outliers_ensg_2022-10-26.Rds")
+# read in batch corrected data with correct tx2gene -> created with GTF file
+#dds.ensg.remove.outliers <- readRDS("/home/rstudio/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/dds_remove_outliers_batch_corrected_20230516_ensg_tx2gene_gtf.Rds")
+dds.ensg.remove.outliers.no.inhouse <- readRDS("/home/rstudio/Documents/PhD/subtypes/caf-subtype-analysis/intermediate_files/dds_not_corrected_remove_outliers_no_inhouse_20230517_tx2gene_gtf.Rds")
+
+#dds.ensg.remove.outliers.no.inhouse <- dds.ensg.remove.outliers[,which(dds.ensg.remove.outliers$Study != "InHouse")] 
+```
+
+```{r Filter out lowly expressed genes}
+colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation)
+dds.ensg.remove.outliers.no.inhouse <- DESeq(dds.ensg.remove.outliers.no.inhouse)
+dds.ensg.remove.outliers.no.inhouse <- filter_out_low_expressed(dds.ensg.remove.outliers.no.inhouse)
+```
+
+```{r}
+vst.dds.ensg.remove.outliers.no.inhouse <- vst(dds.ensg.remove.outliers.no.inhouse)
+plotPCA(vst.dds.ensg.remove.outliers.no.inhouse, ntop = nrow(vst.dds.ensg.remove.outliers.no.inhouse), intgroup = "Subpopulation")
+```
+
+```{r}
+counts.ensg.remove.outliers.no.inhouse  <- counts(dds.ensg.remove.outliers.no.inhouse, normalized = TRUE)
+idx  <- rowMeans(counts.ensg.remove.outliers.no.inhouse) > 1
+counts.ensg.remove.outliers.no.inhouse  <- counts.ensg.remove.outliers.no.inhouse[idx, ]
+
+mod <- model.matrix(~ Subpopulation + Tumor_JuxtaTumor, colData(dds.ensg.remove.outliers.no.inhouse))
+mod0 <- model.matrix(~ 1, colData(dds.ensg.remove.outliers.no.inhouse))
+#svseq_no_inhouse_non_corrected <- svaseq(counts.ensg.remove.outliers.no.inhouse, mod, mod0, n.sv = 9) # use 9 surrogate variables
+svseq_no_inhouse_non_corrected <- svaseq(counts.ensg.remove.outliers.no.inhouse, mod, mod0, n.sv = 11) # use 9 surrogate variables
+
+colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Tumor_JuxtaTumor)
+colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation <- as.factor(colData(dds.ensg.remove.outliers.no.inhouse)$Subpopulation)
+
+sv_names <- paste("SV", seq(1,svseq_no_inhouse_non_corrected$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+  colData(dds.ensg.remove.outliers.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse_non_corrected$sv[,i]
+}
+
+#design(dds.ensg.remove.outliers.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + Subpopulation
+design(dds.ensg.remove.outliers.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 +SV10 + SV11+ Subpopulation
+```
+
+```{r}
+# print("carrying out deseq analysis...")
+# ptm <- proc.time()
+# dds.ensg.remove.outliers.no.inhouse.full.design <- DESeq(dds.ensg.remove.outliers.no.inhouse)
+# time_taken <- proc.time() - ptm
+# print("time taken...")
+# print(time_taken)
+```
+
+```{r}
+date <- Sys.Date()
+#outfile.dds.ensg.nsv.9 <- paste("../intermediate_files/dds_model_fit_ensg_nsv9_", date, ".Rds", sep = "")
+outfile.dds.ensg.nsv.11 <- paste("/home/rstudio/Desktop/dds_model_fit_ensg_nsv11_tx2gene_gtf_", date, ".Rds", sep = "")
+saveRDS(file = outfile.dds.ensg.nsv.11, object = dds.ensg.remove.outliers.no.inhouse.full.design)
+```
+
+```{r}
+dds.ensg.remove.outliers.no.inhouse.full.design <- readRDS("../intermediate_files/dds_model_fit_ensg_nsv9_2022-10-26.Rds")
+```
+
+```{r Define model matrix not batch corrected}
+# define model matrix
+mod_mat <- model.matrix(design(dds.ensg.remove.outliers.no.inhouse.full.design), colData(dds.ensg.remove.outliers.no.inhouse.full.design))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S1",])
+S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S3",])
+S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S4",])
+not_S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S3", "S4"),])
+not_S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S1", "S4"),])
+not_S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S1", "S3"),])
+```
+
+#### Extract results alternative hypothesis greater
+
+```{r Extract results for each pairwise contrast}
+res_not_S1 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+res_not_S3 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+res_not_S4 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S4 - not_S4, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+```
+
+```{r}
+sv.9.results <- list(S1 = rownames(res_not_S1[which(res_not_S1$padj < 0.05),]), S3 = rownames(res_not_S3[which(res_not_S3$padj < 0.05),]), S4 = rownames(res_not_S4[which(res_not_S4$padj < 0.05),]))
+sv.9.results.significant <- list(S1 = res_not_S1[which(res_not_S1$padj < 0.05),], S3 = res_not_S3[which(res_not_S3$padj < 0.05),], S4 = res_not_S4[which(res_not_S4$padj < 0.05),])
+```
+
+
+Rerun with all surrogate variables
+
+```{r}
+svseq_no_inhouse_non_corrected <- svaseq(counts.ensg.remove.outliers.no.inhouse, mod, mod0) # use default number of surrogate variables, 21
+sv_names <- paste("SV", seq(1,svseq_no_inhouse_non_corrected$n.sv), sep = "")
+for (i in 1:length(sv_names)){
+  colData(dds.ensg.remove.outliers.no.inhouse)[,sv_names[i]] <- svseq_no_inhouse_non_corrected$sv[,i]
+}
+
+design(dds.ensg.remove.outliers.no.inhouse) <- ~ Tumor_JuxtaTumor + SV1 + SV2 + SV3 + SV4 + SV5 + SV6 + SV7 + SV8 + SV9 + SV10 + SV11 + SV12 + SV13 + SV14 + SV15 + SV16 + SV17 + SV18 + SV19 + SV20 + SV21 + Subpopulation
+```
+
+```{r}
+#print("carrying out deseq analysis...")
+#ptm <- proc.time()
+#dds.ensg.remove.outliers.no.inhouse.full.design <- DESeq(dds.ensg.remove.outliers.no.inhouse)
+#time_taken <- proc.time() - ptm
+#print("time taken...")
+#print(time_taken)
+#date <- Sys.Date()
+#outfile.dds.ensg.nsv.21 <- paste("../intermediate_files/dds_model_fit_ensg_nsv21_", date, ".Rds", sep = "")
+#saveRDS(file = outfile.dds.ensg.nsv.21, object = dds.ensg.remove.outliers.no.inhouse.full.design)
+```
+
+```{r}
+dds.ensg.remove.outliers.no.inhouse.full.design <- readRDS("../intermediate_files/dds_model_fit_ensg_nsv21_2022-10-26.Rds")
+```
+
+```{r Define model matrix not batch corrected sv 21}
+# define model matrix
+mod_mat <- model.matrix(design(dds.ensg.remove.outliers.no.inhouse.full.design), colData(dds.ensg.remove.outliers.no.inhouse.full.design))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S1",])
+S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S3",])
+S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation == "S4",])
+not_S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S3", "S4"),])
+not_S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S1", "S4"),])
+not_S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design$Subpopulation %in% c("S1", "S3"),])
+```
+
+```{r Extract results for each pairwise contrast sv 21}
+res_not_S1 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+res_not_S3 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+res_not_S4 <- results(dds.ensg.remove.outliers.no.inhouse.full.design, contrast = S4 - not_S4, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
+```
+
+```{r}
+sv.21.results <- list(S1 = rownames(res_not_S1[which(res_not_S1$padj < 0.05),]), S3 = rownames(res_not_S3[which(res_not_S3$padj < 0.05),]), S4 = rownames(res_not_S4[which(res_not_S4$padj < 0.05),]))
+
+```
+
+
+```{r}
+length(sv.21.results$S1)
+length(sv.9.results$S1)
+length(sv.21.results$S3)
+length(sv.9.results$S3)
+length(sv.21.results$S4)
+length(sv.9.results$S4)
+```
+
+```{r}
+
+getBM.call <- function(vec){
+  info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description",
+                               "entrezgene_id"),
+                  filters = "ensembl_gene_id_version",
+                  values = vec,
+                  mart = mart,
+                  useCache=FALSE)
+}
+
+sv.21.results.annotated <- list()
+names.list <- c("S1", "S3", "S4")
+for (i in 1:length(sv.21.results)){
+  sv.21.results.annotated[[i]] <- getBM.call(sv.21.results[[i]])
+  names(sv.21.results.annotated)[i] <- names.list[i]
+}
+
+annotate.geneset.list.ensg.version <- function(geneset.list){
+  geneset.list.annotated <- list()
+  names.list <- names(geneset.list)
+  for (i in 1:length(geneset.list)){
+    geneset.list.annotated[[i]] <- getBM.call(geneset.list[[i]])
+    names(geneset.list.annotated)[i] <- names.list[i]
+  }
+  return(geneset.list.annotated)
+}
+sv.9.results.annotated <- list()
+names.list <- c("S1", "S3", "S4")
+for (i in 1:length(sv.9.results)){
+  sv.9.results.annotated[[i]] <- getBM.call(sv.9.results[[i]])
+  names(sv.9.results.annotated)[i] <- names.list[i]
+}
+```
+
+```{r}
+length(which(sv.9.results$S1 %in% sv.21.results$S1))
+length(which(sv.9.results$S3 %in% sv.21.results$S3))
+length(which(sv.9.results$S4 %in% sv.21.results$S4))
+```
+
+In a previous analysis, 5 cell surface markers were found to be upregulated in CAFs vs TANs: WT1, SLC7A2, GPR116, GPR37 and PCDH10.
+
+GPR116 (HGNC ADGRF5) was found to be upregulated in S4
+
+```{r}
+sv.9.results.annotated$S4[sv.9.results.annotated$S4$hgnc_symbol == "ADGRF5",]
+sv.9.results.significant.s4.adgrf5 <- sv.9.results.significant$S4[which(rownames(sv.9.results.significant$S4) == "ENSG00000069122.19"),]
+sv.9.results.significant.s4.adgrf5
+```
+
+```{r}
+date <- Sys.Date()
+outfile.sv.9.genesig <- paste("../intermediate_files/sv9_deanalysis_genesig_alpha05_lfc2_padj05_", date, ".Rds", sep = "")
+#saveRDS(sv.9.results, file = outfile.sv.9.genesig)
+```
+
+#### Extract results alternative hypothesis twosided
+
+```{r}
+dds.ensg.remove.outliers.no.inhouse.full.design.sv9 <- readRDS("../intermediate_files/dds_model_fit_ensg_nsv9_2022-10-26.Rds")
+
+annotate.direction <- function(results.object){
+  results.object$direction <- ifelse(results.object$log2FoldChange > 0, "Up", "Down")
+  return(data.frame(results.object))
+}
+# define model matrix
+mod_mat <- model.matrix(design(dds.ensg.remove.outliers.no.inhouse.full.design.sv9), colData(dds.ensg.remove.outliers.no.inhouse.full.design.sv9))
+# e.g. for each sample that is S1, get the mean of the coefficients all the components of the formula 
+S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation == "S1",])
+S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation == "S3",])
+S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation == "S4",])
+not_S1 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation %in% c("S3", "S4"),])
+not_S3 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation %in% c("S1", "S4"),])
+not_S4 <- colMeans(mod_mat[dds.ensg.remove.outliers.no.inhouse.full.design.sv9$Subpopulation %in% c("S1", "S3"),])
+res_not_S1_twosided <- results(dds.ensg.remove.outliers.no.inhouse.full.design.sv9, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greaterAbs")
+res_not_S1_twosided <- annotate.direction(res_not_S1_twosided)
+res_not_S3_twosided <- results(dds.ensg.remove.outliers.no.inhouse.full.design.sv9, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greaterAbs")
+res_not_S3_twosided <- annotate.direction(res_not_S3_twosided)
+res_not_S4_twosided <- results(dds.ensg.remove.outliers.no.inhouse.full.design.sv9, contrast = S4 - not_S4, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greaterAbs")
+res_not_S4_twosided <- annotate.direction(res_not_S4_twosided)
+length(which(res_not_S1_twosided$padj < 0.05))
+length(which(res_not_S3_twosided$padj < 0.05))
+length(which(res_not_S4_twosided$padj < 0.05))
+```
+
+```{r}
+library(GSEABase)
+s1.results.ordered <- res_not_S1_twosided[which(res_not_S1_twosided$padj < 0.05),] %>% arrange(desc(abs(log2FoldChange))) %>% mutate(Subpopulation = "S1")
+s3.results.ordered <- res_not_S3_twosided[which(res_not_S3_twosided$padj < 0.05),] %>% arrange(desc(abs(log2FoldChange))) %>% mutate(Subpopulation = "S3")
+s4.results.ordered <- res_not_S4_twosided[which(res_not_S4_twosided$padj < 0.05),] %>% arrange(desc(abs(log2FoldChange))) %>% mutate(Subpopulation = "S4")
+s1.geneset <- GeneColorSet(
+  setName = "S1",
+  geneIds = rownames(s1.results.ordered),
+  geneColor = factor(s1.results.ordered$direction),
+  phenotype = "Myofibroblastic"
+)
+s3.geneset <- GeneColorSet(
+  setName = "S3",
+  geneIds = rownames(s3.results.ordered),
+  geneColor = factor(s3.results.ordered$direction),
+  phenotype = "Normal-like"
+)
+s4.geneset <- GeneColorSet(
+  setName = "S4",
+  geneIds = rownames(s4.results.ordered),
+  geneColor = factor(s4.results.ordered$direction),
+  phenotype = "Inflammatory"
+)
+#saveRDS(s1.geneset, file = paste("../intermediate_files/singscore/genesig_s1_bidirectional_", Sys.Date(), ".Rds"))
+#saveRDS(s3.geneset, file = paste("../intermediate_files/singscore/genesig_s3_bidirectional_", Sys.Date(), ".Rds"))
+#saveRDS(s4.geneset, file = paste("../intermediate_files/singscore/genesig_s4_bidirectional_", Sys.Date(), ".Rds"))
+
+```
+
+There is overlap between genes inese sets. Are the directions the opposite as we would expect?
+
+```{r}
+s1.s3.overlap.directions <- data.frame(genes = rownames(s1.results.ordered[intersect(rownames(s1.results.ordered), rownames(s3.results.ordered)),]), direction.s1 = s1.results.ordered[intersect(rownames(s1.results.ordered), rownames(s3.results.ordered)),][,c(8)], direction.s3 = s3.results.ordered[intersect(rownames(s1.results.ordered), rownames(s3.results.ordered)),][,c(8)])
+s1.s4.overlap.directions <- data.frame(genes = rownames(s1.results.ordered[intersect(rownames(s1.results.ordered), rownames(s4.results.ordered)),]), direction.s1 = s1.results.ordered[intersect(rownames(s1.results.ordered), rownames(s4.results.ordered)),][,c(8)], direction.s4 = s4.results.ordered[intersect(rownames(s1.results.ordered), rownames(s4.results.ordered)),][,c(8)])
+s3.s4.overlap.directions <- data.frame(genes = rownames(s3.results.ordered[intersect(rownames(s3.results.ordered), rownames(s4.results.ordered)),]), direction.s3 = s3.results.ordered[intersect(rownames(s3.results.ordered), rownames(s4.results.ordered)),][,c(8)], direction.s4 = s4.results.ordered[intersect(rownames(s3.results.ordered), rownames(s4.results.ordered)),][,c(8)])
+s1.s3.overlap.directions.equal <- length(which(s1.s3.overlap.directions$direction.s1 == s1.s3.overlap.directions$direction.s3))/nrow(s1.s3.overlap.directions)
+s1.s4.overlap.directions.equal <- length(which(s1.s4.overlap.directions$direction.s1 == s1.s4.overlap.directions$direction.s4))/nrow(s1.s4.overlap.directions)
+s3.s4.overlap.directions.equal <- length(which(s3.s4.overlap.directions$direction.s3 == s3.s4.overlap.directions$direction.s4))/nrow(s3.s4.overlap.directions)
+print(paste("Percentage of overlapping genes with same direction in S1 and S3 signatures:", 100*s1.s3.overlap.directions.equal))
+print(paste("Percentage of overlapping genes with same direction in S1 and S4 signatures:", 100*s1.s4.overlap.directions.equal))
+print(paste("Percentage of overlapping genes with same direction in S3 and S4 signatures:", 100*s3.s4.overlap.directions.equal))
+```
+
+```{r}
+sv.9.results.twosided <- list(S1 = rownames(res_not_S1_twosided[which(res_not_S1_twosided$padj < 0.05),]), S3 = rownames(res_not_S3_twosided[which(res_not_S3_twosided$padj < 0.05),]), S4 = rownames(res_not_S4_twosided[which(res_not_S4_twosided$padj < 0.05),]))
+names.list <- c("S1", "S3", "S4")
+sv.9.results.twosided.annotated <- annotate.geneset.list.ensg.version(sv.9.results.twosided)
+
+outfile.sv.9.genesig.twosided <- paste("../intermediate_files/sv9_deanalysis_genesig_alpha05_lfc2_padj05_twosided_", date, ".Rds", sep = "")
+
+#saveRDS(sv.9.results.twosided, file = outfile.sv.9.genesig.twosided)
+```
+
+Use set operations to extract genes only differentially expressed in 1 subpopulation
+
+```{r}
+A <- sv.9.results.twosided$S1
+B <- sv.9.results.twosided$S3
+C <- sv.9.results.twosided$S4
+a.and.b <- intersect(A,B)
+a.and.c <- intersect(A,C)
+b.and.c <- intersect(B,C)
+union.a.b.a.c <- union(a.and.b,a.and.c)
+union.a.b.a.c.union.b.c <- union(union.a.b.a.c, b.and.c)
+s1.filtered <- sv.9.results.twosided$S1[which(!(sv.9.results.twosided$S1 %in% union.a.b.a.c.union.b.c))]
+s3.filtered <- sv.9.results.twosided$S3[which(!(sv.9.results.twosided$S3 %in% union.a.b.a.c.union.b.c))]
+s4.filtered <- sv.9.results.twosided$S4[which(!(sv.9.results.twosided$S4 %in% union.a.b.a.c.union.b.c))]
+sv.9.results.twosided.filtered <- list(S1 = s1.filtered, S3 = s3.filtered, S4 = s4.filtered)
+
+```
+
+```{r}
+sv.9.results.filtered.annotated <- list()
+names.list <- c("S1", "S3", "S4")
+for (i in 1:length(sv.9.results.twosided.filtered)){
+  sv.9.results.filtered.annotated[[i]] <- getBM.call(sv.9.results.twosided.filtered[[i]])
+  names(sv.9.results.filtered.annotated)[i] <- names.list[i]
+  sv.9.results.filtered.annotated[[i]] <- mutate(sv.9.results.filtered.annotated[[i]], Subpopulation=names.list[i])
+}
+sv.9.results.filtered.annotated.combined <- rbind.data.frame(sv.9.results.filtered.annotated$S1, sv.9.results.filtered.annotated$S3, sv.9.results.filtered.annotated$S4)
+sv.9.results.filtered.annotated.combined %>% group_by(Subpopulation) %>% count()
+sv.9.results.filtered.annotated.combined$direction <- "test"
+sv.9.results.filtered.annotated.combined
+```
+
+```{r test code for adding direction}
+sv.9.results.filtered.annotated.combined.distinct <- distinct(sv.9.results.filtered.annotated.combined, ensembl_gene_id_version, .keep_all = TRUE)
+stopifnot(length(which(rownames(res_not_S1_twosided) %in% sv.9.results.filtered.annotated.combined.distinct$ensembl_gene_id_version[which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S1")])) == length(which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S1")))
+stopifnot(length(which(rownames(res_not_S3_twosided) %in% sv.9.results.filtered.annotated.combined.distinct$ensembl_gene_id_version[which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S3")])) == length(which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S3")))
+stopifnot(length(which(rownames(res_not_S4_twosided) %in% sv.9.results.filtered.annotated.combined.distinct$ensembl_gene_id_version[which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S4")])) == length(which(sv.9.results.filtered.annotated.combined.distinct$Subpopulation == "S4")))
+```
+
+
+### DE analysis on batch corrected data using surrogate variables
+
+DE analysis was also carried out on the batch-corrected data using surrogate variables as covariates (see `caf_subpopulation_analysis_23-09-2022.Rmd`). Here we read in the DESeq object.
+
+```{r}
+de.seq.results.batch.corrected.sv22 <- readRDS("../outfiles/dds_no_inhouse_batch_corrected_deseq_svseq_25-09-2022.Rds")
+```
+
