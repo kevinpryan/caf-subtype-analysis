@@ -12,9 +12,35 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r include=FALSE}
 library(MLSeq)
 library(DESeq2)
+library(here)
+library(biomaRt)
+library(tidyr)
+library(dplyr)
+```
+
+```{r}
+getBM.call.distinct.ensg.version <- function(vec){
+  library(biomaRt)
+  library(dplyr)
+  mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
+  info <- getBM(attributes=c("hgnc_symbol",
+                               "ensembl_gene_id_version",
+                               "chromosome_name",
+                               "start_position",
+                               "end_position",
+                               "strand",
+                               "entrezgene_description",
+                               "entrezgene_id"
+                               ),
+                  filters = "ensembl_gene_id_version",
+                  values = vec,
+                  mart = mart,
+                  useCache=FALSE)
+  info.out <- distinct(info, ensembl_gene_id_version, .keep_all = TRUE)
+}
 ```
 
 ## TODO
@@ -27,9 +53,20 @@ I will use the R package MLSeq, which is designed for the application of ML algo
 
 I will split my batch-corrected data into 2 objects, one of which has the labelled data (known subpopulation), and the other one with the unlabelled data (unknown subpopulation).
 
+```{r Set seed for this whole analysis}
+initial_seed <- as.integer(Sys.time())
+print(initial_seed)
+the_seed=initial_seed %% 100000
+print(the_seed) # 97028, this is the seed the first time around
+set.seed(97028)
+```
+
+
+
 ```{r}
 dds_batch_corrected_outliers_removed <- readRDS(here("intermediate_files/dds_batch_corrected_group_tumor_ensembl_gene_id_version_2022-10-07.Rds"))
-data_df <- assay(dds_batch_corrected_outliers_removed)[2:nrow(assay(dds_batch_corrected_outliers_removed)),] 
+#data_df <- assay(dds_batch_corrected_outliers_removed)[2:nrow(assay(dds_batch_corrected_outliers_removed)),] 
+data_df <- assay(dds_batch_corrected_outliers_removed)
 labelled <- which(dds_batch_corrected_outliers_removed$Subpopulation != "Unknown")
 unlabelled <- which(dds_batch_corrected_outliers_removed$Subpopulation == "Unknown")
 #dd_batch_corrected_outliers_removed_labelled <- dds_batch_corrected_outliers_removed[,labelled]
@@ -46,11 +83,16 @@ class <- DataFrame(Class = factor(metadata_labelled$Subpopulation))
                    #, row.names = metadata_labelled$names)
 ```
 
+```{r}
+data.unlabelled.S4 <- DESeqDataSetFromMatrix(df_batch_corrected_outliers_removed_unlabelled, colData = metadata_unlabelled, design = ~1)
+```
+
+
 ```{r Do train test split}
-set.seed(2128)
 nTest <- ceiling(ncol(df_batch_corrected_outliers_removed_labelled) * 0.3)
 ind <- sample(ncol(df_batch_corrected_outliers_removed_labelled), nTest, FALSE)
-
+# 70% training
+# add pseudocount of 1 to avoid dividing by zero errors
 data.train <- as.matrix(df_batch_corrected_outliers_removed_labelled[ ,-ind] + 1)
 data.test <- as.matrix(df_batch_corrected_outliers_removed_labelled[ ,ind] + 1)
 
@@ -64,64 +106,92 @@ data.testS4 = DESeqDataSetFromMatrix(countData = data.test, colData = classts, d
 ```
 
 ```{r}
+# set.seed(2128)
+# ctrl.plda <- discreteControl(method = "repeatedcv", number = 5, repeats = 1,
+# tuneLength = 10)
+# # Poisson linear discriminant analysis
+# fit.plda <- classify(data = data.trainS4, method = "PLDA", normalize = "deseq", ref = "S1", control = ctrl.plda)
+# selectedGenes(fit.plda)
+# print("Gene selected by the classifier: ACTA2 - alphaSMA")
+# method(fit.plda) <- "PLDA2"
+# fit.plda <- update(fit.plda)
+# show(fit.plda)
+# trained(fit.plda)
+# plda2.genes <-selectedGenes(fit.plda)
+# plda2.genes.annotated <- getBM.call.distinct.ensg.version(plda2.genes)
+# dim(plda2.genes.annotated)
+# length(plda2.genes)
+```
+
+```{r}
+# pred.plda2 <- predict(fit.plda, data.testS4)
+# show(plda2)
+# pred.plda2 <- relevel(pred.plda2, ref = "S1")
+# actual <- relevel(classts$Class, ref = "S1")
+# tbl <- table(Predicted = pred.plda2, Actual = actual)
+# output.plda2 <- confusionMatrix(tbl)
+# output.plda2$byClass
+```
+
+
+```{r}
 # Support Vector Machines with Radial Kernel
 #fit <- classify(data = data.trainS4, method = "svmRadial", preProcessing = "deseq-logcpm", ref = "S1", control = trainControl(method = "repeatedcv", number = 2, repeats = 2, classProbs = TRUE))
 # random Forest (RF) Classification
- rf <- classify(data = data.trainS4, method = "rf",
-         preProcessing = "deseq-vst", #ref = "T",
-         control = trainControl(method = "repeatedcv", number = 5,
-                                repeats = 2, classProbs = TRUE))
-show(rf)
+#  rf <- classify(data = data.trainS4, method = "rf",
+#          preProcessing = "deseq-vst", #ref = "T",
+#          control = trainControl(method = "repeatedcv", number = 5,
+#                                 repeats = 2, classProbs = TRUE))
+# show(rf)
 ```
 
 ```{r}
-#Predicted class labels
-pred.rf <- predict(rf, data.testS4)
-pred.rf
+# #Predicted class labels
+# pred.rf <- predict(rf, data.testS4)
+# pred.rf
 ```
 
 ```{r}
-pred.rf <- relevel(pred.rf, ref = "S1")
-actual <- relevel(classts$Class, ref = "S1")
+# pred.rf <- relevel(pred.rf, ref = "S1")
+# actual <- relevel(classts$Class, ref = "S1")
 ```
 
 ```{r}
-tbl <- table(Predicted = pred.rf, Actual = actual)
-confusionMatrix(tbl, positive = "S1")
+# tbl <- table(Predicted = pred.rf, Actual = actual)
+# confusionMatrix(tbl, positive = "S1")
 ```
 
 
 ```{r Try a number of different algorithms}
-set.seed(2128)
-# Define control lists.
-ctrl.continuous <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
-ctrl.discrete <- discreteControl(method = "repeatedcv", number = 5, repeats = 10,
-tuneLength = 10)
-ctrl.voom <- voomControl(method = "repeatedcv", number = 5, repeats = 10,
-tuneLength = 10)
-# 1. Continuous classifiers, SVM and NSC
-fit.svm <- classify(data = data.trainS4, method = "svmRadial",preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
-fit.NSC <- classify(data = data.trainS4, method = "pam", preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
-# 2. Discrete classifiers
-fit.plda <- classify(data = data.trainS4, method = "PLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
-fit.plda2 <- classify(data = data.trainS4, method = "PLDA2", normalize = "deseq", ref = "S1", control = ctrl.discrete)
-fit.nblda <- classify(data = data.trainS4, method = "NBLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
-# 3. voom-based classifiers
-fit.voomDLDA <- classify(data = data.trainS4, method = "voomDLDA", normalize = "deseq", ref = "S1", control = ctrl.voom)
-fit.voomNSC <- classify(data = data.trainS4, method = "voomNSC", normalize = "deseq", ref = "S1", control = ctrl.voom)
-# 4. Predictions
-## continuous
-pred.svm <- predict(fit.svm, data.testS4)
-pred.NSC <- predict(fit.NSC, data.testS4)
-
-## discrete
-pred.plda <- predict(fit.plda, data.testS4)
-pred.plda2 <- predict(fit.plda2, data.testS4)
-pred.nblda <- predict(fit.nblda, data.testS4)
-
-## voom-based
-pred.voomDLDA <- predict(fit.voomDLDA, data.testS4)
-pred.voomNSC <- predict(fit.voomNSC, data.testS4)
+# set.seed(2128)
+# # Define control lists.
+# ctrl.continuous <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+# ctrl.discrete <- discreteControl(method = "repeatedcv", number = 5, repeats = 10,
+# tuneLength = 10)
+# ctrl.voom <- voomControl(method = "repeatedcv", number = 5, repeats = 10, tuneLength = 10)
+# # 1. Continuous classifiers, SVM and NSC
+# fit.svm <- classify(data = data.trainS4, method = "svmRadial",preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+# fit.NSC <- classify(data = data.trainS4, method = "pam", preProcessing = "deseq-vst", ref = "S1", tuneLength = 10, control = ctrl.continuous)
+# # 2. Discrete classifiers
+# fit.plda <- classify(data = data.trainS4, method = "PLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+# fit.plda2 <- classify(data = data.trainS4, method = "PLDA2", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+# fit.nblda <- classify(data = data.trainS4, method = "NBLDA", normalize = "deseq", ref = "S1", control = ctrl.discrete)
+# # 3. voom-based classifiers
+# fit.voomDLDA <- classify(data = data.trainS4, method = "voomDLDA", normalize = "deseq", ref = "S1", control = ctrl.voom)
+# fit.voomNSC <- classify(data = data.trainS4, method = "voomNSC", normalize = "deseq", ref = "S1", control = ctrl.voom)
+# # 4. Predictions
+# ## continuous
+# pred.svm <- predict(fit.svm, data.testS4)
+# pred.NSC <- predict(fit.NSC, data.testS4)
+# 
+# ## discrete
+# pred.plda <- predict(fit.plda, data.testS4)
+# pred.plda2 <- predict(fit.plda2, data.testS4)
+# pred.nblda <- predict(fit.nblda, data.testS4)
+# 
+# ## voom-based
+# pred.voomDLDA <- predict(fit.voomDLDA, data.testS4)
+# pred.voomNSC <- predict(fit.voomNSC, data.testS4)
 
 ```
 
@@ -133,8 +203,173 @@ confus_mat <- function(prediction, actual){
   tbl <- table(Predicted = prediction, Actual = actual)
   return(confusionMatrix(tbl, positive = "S1"))
 }
+
+# PLDA, PLDA2, NBLDA
+
+mlseq_train_predict_discrete <- function(train.data, test.data, eval.data, ml.method, classts){
+  stopifnot(ml.method %in% c("PLDA", "PLDA2", "NBLDA"))
+  library(DESeq2)
+  library(MLSeq)
+  # set control params for training
+  ctrl.discrete <- discreteControl(method = "repeatedcv", number = 5, repeats = 10, tuneLength = 10)
+  # “deseq median ratio normalization”, which estimates the size factors by dividing each sample by the geometric means of the transcript counts
+  fit <- classify(data = train.data, method = ml.method, normalize = "deseq", ref = "S1", control = ctrl.discrete)
+  # predict on test data
+  pred <- predict(fit, test.data)
+  pred <- relevel(pred, ref = "S1")
+  actual <- relevel(classts$Class, ref = "S1")
+  tbl <- table(Predicted = pred, Actual = actual)
+  # create confusion matrix
+  output.confusion <- confusionMatrix(tbl)
+  byclass <- data.frame(output.confusion$byClass)
+  #extract F1 score - 2*(precision*recall/(precision+recall)) 
+  F1 <- byclass$F1
+  names(F1) <- levels(actual)
+  prediction.eval.data <- predict(fit, eval.data)
+  names(prediction.eval.data) <- colData(eval.data)$names
+  outputs <- list(F1 = F1, Predictions = prediction.eval.data, confusion.mat = output.confusion)
+  return(outputs)
+}
+
+# rf, svm, knn
+
+mlseq_train_predict_continuous <- function(train.data, test.data, eval.data, ml.method, classts){
+  library(DESeq2)
+  library(MLSeq)
+  # set control params for training - use traincontrol for continuous
+  # classprobs is automatically FALSE here - could be TRUE when using traincontrol
+  ctrl.continuous <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+  # need to normalise data (deseq median ratio normalisation) and transform data to make it closer to microarray data
+  fit <- classify(data = train.data, method = ml.method, normalize = "deseq-vst", ref = "S1", control = ctrl.continuous)
+  # predict on test data
+  pred <- predict(fit, test.data)
+  pred <- relevel(pred, ref = "S1")
+  actual <- relevel(classts$Class, ref = "S1")
+  tbl <- table(Predicted = pred, Actual = actual)
+  # create confusion matrix
+  output.confusion <- confusionMatrix(tbl)
+  byclass <- data.frame(output.confusion$byClass)
+  #extract F1 score - 2*(precision*recall/(precision+recall)) 
+  F1 <- byclass$F1
+  names(F1) <- levels(actual)
+  prediction.eval.data <- predict(fit, eval.data)
+  names(prediction.eval.data) <- colData(eval.data)$names
+  outputs <- list(F1 = F1, Predictions = prediction.eval.data, confusion.mat = output.confusion)
+  return(outputs)
+}
+
+# voomNSC
+
+mlseq_train_predict_voom <- function(train.data, test.data, eval.data, ml.method, classts){
+  library(DESeq2)
+  library(MLSeq)
+  # set control params for training - use traincontrol for continuous
+  # classprobs is automatically FALSE here - could be TRUE when using traincontrol
+  ctrl.voom <- voomControl(method = "repeatedcv", number = 5, repeats = 10, tuneLength = 10)
+  # need to normalise data (deseq median ratio normalisation) and transform data to make it closer to microarray data
+  fit <- classify(data = train.data, method = ml.method, normalize = "deseq", ref = "S1", control = ctrl.voom)
+  # predict on test data
+  pred <- predict(fit, test.data)
+  pred <- relevel(pred, ref = "S1")
+  actual <- relevel(classts$Class, ref = "S1")
+  tbl <- table(Predicted = pred, Actual = actual)
+  # create confusion matrix
+  output.confusion <- confusionMatrix(tbl)
+  byclass <- data.frame(output.confusion$byClass)
+  #extract F1 score - 2*(precision*recall/(precision+recall)) 
+  F1 <- byclass$F1
+  names(F1) <- levels(actual)
+  prediction.eval.data <- predict(fit, eval.data)
+  names(prediction.eval.data) <- colData(eval.data)$names
+  outputs <- list(F1 = F1, Predictions = prediction.eval.data, confusion.mat = output.confusion)
+  return(outputs)
+}
+```
+
+
+$$F1 = 2*\frac{Precision\times Recall}{Precision+Recall}$$
+
+```{r}
+# results.plda <- mlseq_train_predict_discrete(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "PLDA", classts = classts)
+# results.plda2 <- mlseq_train_predict_discrete(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "PLDA2", classts = classts)
+# results.nblda <- mlseq_train_predict_discrete(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "NBLDA", classts = classts)
+# results.rf <- mlseq_train_predict_continuous(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "rf", classts = classts)
+# results.knn <- mlseq_train_predict_continuous(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "knn", classts = classts)
+# results.voomNSC <- mlseq_train_predict_voom(train.data = data.trainS4, test.data = data.testS4, eval.data = data.unlabelled.S4, ml.method = "voomNSC", classts = classts)
 ```
 
 ```{r}
-confus_mat(pred.svm, actual)
+# NOTE F1 score cannot be zero - but is undefined when no correct predictions are made. Call it zero for plotting purposes
+
+# results.plda.na.zero <- results.plda
+# results.plda.na.zero$F1[is.na(results.plda.na.zero$F1)] <- 0
+# 
+# results.plda2.na.zero <- results.plda2
+# results.plda2.na.zero$F1[is.na(results.plda2.na.zero$F1)] <- 0
+# 
+# results.nblda.na.zero <- results.nblda
+# results.nblda.na.zero$F1[is.na(results.nblda.na.zero$F1)] <- 0
+# 
+# results.rf.na.zero <- results.rf
+# results.rf.na.zero$F1[is.na(results.rf.na.zero$F1)] <- 0
+# 
+# results.knn.na.zero <- results.knn
+# results.knn.na.zero$F1[is.na(results.knn.na.zero$F1)] <- 0
+# 
+# results.voomNSC.na.zero <- results.voomNSC
+# results.voomNSC.na.zero$F1[is.na(results.voomNSC.na.zero$F1)] <- 0
+# 
+# all.results <- list(results.plda.na.zero, results.plda2.na.zero, results.nblda.na.zero, results.rf.na.zero, results.knn.na.zero, results.voomNSC.na.zero)
+ml.methods.list <- c("PLDA", "PLDA2", "NBLDA", "Random forest", "KNN", "voomNSC")
+# names(all.results) <- ml.methods.list
+# saveRDS(all.results, file = "../outfiles/mlseq.results.2022-11-17.Rds")
+all.results.in <- readRDS("../outfiles/mlseq.results.2022-11-17.Rds")
 ```
+
+```{r}
+f1.scores <- data.frame(
+all.results.in$PLDA$F1,
+all.results.in$PLDA2$F1,
+all.results.in$NBLDA$F1,
+all.results.in$`Random forest`$F1,
+all.results.in$KNN$F1,
+all.results.in$voomNSC$F1
+)
+# f1.scores <- data.frame(results.plda.na.zero$F1,
+#                         results.plda2.na.zero$F1,
+#                         results.nblda.na.zero$F1,
+#                         results.rf.na.zero$F1,
+#                         results.knn.na.zero$F1,
+#                         results.voomNSC.na.zero$F1)
+colnames(f1.scores) <- ml.methods.list
+f1.scores.outfile <- "../outfiles/f1_scores_2022-11-23.csv"
+# commented out 20230516
+#write.csv(f1.scores, file = f1.scores.outfile, quote = F)
+```
+
+```{r}
+library(ggplot2)
+# create a dataset
+library(RColorBrewer)
+
+plot.out <- as.data.frame(t(f1.scores)) %>% 
+   mutate(ML.Method = colnames(f1.scores)) %>% 
+  pivot_longer(cols = c("S1", "S3", "S4"), names_to = "Subpopulation") %>% 
+ ggplot(aes(fill=Subpopulation, y=value, x=ML.Method)) + 
+     #geom_bar(position="dodge", stat="identity") +
+   geom_col(position = "dodge", width = 0.7)+
+   xlab("Method") +
+  ylab("F1 Score") +
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"),  axis.text = element_text(size = 10)) +
+   #ggtitle("F1 Scores for classifying CAF subpopulations using MLSeq") +
+       scale_fill_manual(name=NULL,
+                     values = c(brewer.pal(3, "Dark2"), "gray")) +
+   theme(panel.background = element_blank(),
+         axis.line = element_line(colour = "black")) +
+        scale_y_continuous(expand = c(0,0), limits = c(0, 1)) #+
+plot.out
+#   
+# #ggsave(plot.out, filename = "../outfiles/f1_scores_2022-11-22.tiff")
+# saveRDS(plot.out, file = "../outfiles/f1_scores_2022-11-22.Rds")
+```
+

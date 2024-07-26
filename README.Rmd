@@ -55,7 +55,7 @@ The data was processed using nf-core/rnaseq version `3.8.1` using the default pa
 
 We would expect our tumour-associated normal to be most like the S3 subpopulation (usually accumulate in juxta-tumours). The S2 subpopulation has been found to accumulate more in luminal A breast cancer, whereas the S4 subpopulation tends to be present in Her2+ breast cancers. Unfortunately, data is not available for the S2 subpopulation and 11 of the 12 cancers encountered in our samples are Luminal A.
 
-Combining RNA-sequencing datasets from different studies can be very challenging. We can expect batch effects to be present, so it might not be possible to determine whether differences we observe are due to actual biological effects or technical artifacts. In addition, a recent study suggests that DESeq2 and edgeR (the most popular differential expression tools) experience large rates of false positives when used with large sample sizes [@Li2022]. However, this assertion has been refuted, and it has been suggested that the Li 2022 study did not apply appropriate batch correction and quality control ([Twitter thread](https://threadreaderapp.com/thread/1513468597288452097.html) from Mike Love and associated [code on GitHub](https://github.com/mikelove/preNivolumabOnNivolumab/blob/main/preNivolumabOnNivolumab.knit.md)). One of the datasets (`EGAD00001006144`) was produced using stranded RNA-seq, whereas the other datasets were unstranded. This can lead to a lack of comparability of the datasets [@Zhao2020]. It may be necessary to drop this dataset from the analysis. All samples were prepared by poly(A) selection (use of oligo-dT).
+Combining RNA-sequencing datasets from different studies can be very challenging. We can expect batch effects to be present, so it might not be possible to determine whether differences we observe are due to actual biological effects or technical artifacts. In addition, a recent study suggests that DESeq2 and edgeR (the most popular differential expression tools) experience large rates of false positives when used with large sample sizes [@Li2022]. However, this assertion has been refuted, and it has been implied that the Li 2022 study did not apply appropriate batch correction and quality control ([Twitter thread](https://threadreaderapp.com/thread/1513468597288452097.html) from Mike Love and associated [code on GitHub](https://github.com/mikelove/preNivolumabOnNivolumab/blob/main/preNivolumabOnNivolumab.knit.md)). One of the datasets (`EGAD00001006144`) was produced using stranded RNA-seq, whereas the other datasets were unstranded. This can lead to a lack of comparability of the datasets [@Zhao2020]. It may be necessary to drop this dataset from the analysis. All samples were prepared by poly(A) selection (use of oligo-dT).
 
 # Preparation
 
@@ -95,78 +95,7 @@ library(clusterProfiler)
 library(org.Hs.eg.db)
 library(HGNChelper)
 source("scripts/functions_caf_subpopulation_analysis.R")
-```
-
-```{r read in metadata, include=FALSE}
-EGAD_4810 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001004810/delimited_maps/Run_Sample_meta_info.map", 
-                        sep = ";")
-EGAD_4810_cancers <- str_split_fixed(EGAD_4810$V1, pattern = "=", n = 2)[,2]
-EGAD_4810_keep <- which(EGAD_4810_cancers == "BC")
-EGAD_4810_filtered <- EGAD_4810[EGAD_4810_keep,]
-EGAD_4810_meta <- data.frame(
-  Sample = str_split_fixed(EGAD_4810_filtered$V4, pattern = "=", n = 2)[,2],
-  Study = "EGAD00001004810",
-  Subpopulation = "S3",
-  Tumor_JuxtaTumor = tolower(str_split_fixed(EGAD_4810_filtered$V3, pattern = " ", n = 2)[,2]),
-  Strandedness = "unstranded",
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001004810_nfcore_results/star_salmon",
-  row.names = 1
-)
-EGAD_3808 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001003808/meta_CAF-S1_S4_BC_47samples.txt", 
-                        header = T, sep = "\t")
-EGAD_3808_meta <- data.frame(
-  Sample = EGAD_3808$Sample.Name,
-  Study = "EGAD00001003808",
-  Subpopulation = EGAD_3808$subset,
-  Tumor_JuxtaTumor = EGAD_3808$Type,
-  Strandedness = "unstranded",
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001003808_nfcore_results/star_salmon",
-  row.names = 1
-)
-EGAD_6144 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001006144/meta_7samples.txt", 
-                        header = T,sep = "\t")
-EGAD_6144_meta <- data.frame(
-  Sample = paste("CAF_Culture_", EGAD_6144$Sample.Name, sep = ""),
-  Study = "EGAD00001006144",
-  Subpopulation = "S1",
-  Tumor_JuxtaTumor = "tumor",
-  Strandedness = "reverse",
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001006144_nfcore_results/star_salmon",
-  row.names = 1
-)
-EGAD_5744 <- read.table("/home/kevin/Documents/PhD/CAF_data/EGAD00001005744/metaData_Pelon_et_al.txt", 
-                        header =T, check.names = F)
-EGAD_5744$Sample.Name <- gsub(pattern = "\\.", replacement = "-", x = EGAD_5744$Sample.Name )
-EGAD_5744_filtered <- EGAD_5744[!(EGAD_5744$subset == "EPCAM+") & (EGAD_5744$Type == "T"),]
-EGAD_5744_meta <- data.frame(
-  Sample = EGAD_5744_filtered$Sample.Name,
-  Study = "EGAD00001005744",
-  Subpopulation = EGAD_5744_filtered$subset,
-  Tumor_JuxtaTumor = "tumor",
-  Strandedness = "unstranded",
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/EGAD00001005744_nfcore_results/star_salmon",
-  row.names = 1
-)
-barkley_samples <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples.csv", 
-                            header = T, row.names = "samples", check.names = F)
-barkley_samples_meta <- data.frame(
-  Sample = row.names(barkley_samples),
-  Study = "InHouse",
-  Subpopulation = "Unknown",
-  Tumor_JuxtaTumor = ifelse(barkley_samples$Condition == "Tumour", "tumor", "juxtatumor"),
-  Strandedness = "unstranded",
-  directory = "/home/kevin/Documents/PhD/CAF_data/nfcore_results/inhouse_data_nfcore_results_version_3_8_1/star_salmon",
-  row.names = 1
-)
-metadata <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
-                             EGAD_6144_meta, EGAD_5744_meta, barkley_samples_meta)
-metadata$Tumor_JuxtaTumor <- gsub(x = metadata$Tumor_JuxtaTumor, pattern = "-", replacement = "")
-#write.table(metadata, file = "/home/kevin/Documents/PhD/subtypes/caf-subtype-analysis/metadata_caf_subtypes.txt", quote = F, sep = "\t", row.names = T)
-metadata_no_inhouse <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, 
-                             EGAD_6144_meta, EGAD_5744_meta)
-metadata_no_inhouse$Tumor_JuxtaTumor <- gsub(x = metadata_no_inhouse$Tumor_JuxtaTumor, pattern = "-", replacement = "")
-
-metadata_no_inhouse_no6144 <- rbind.data.frame(EGAD_4810_meta, EGAD_3808_meta, EGAD_5744_meta)
+library(here)
 ```
 
 # Read in data
@@ -176,6 +105,10 @@ Samples were processed with nf-core/rnaseq version `3.8.1`.
 Salmon was used in alignment mode so there is no salmon index and no checksum to import the metadata. Therefore, the parameters recommended in the [tximeta vignette](https://bioconductor.org/packages/release/bioc/vignettes/tximeta/inst/doc/tximeta.html#What_if_checksum_isn%E2%80%99t_known) were used to summarise transcript counts to the gene level, using a tx2gene file constructed using `generate_tx2gene_table.R`.
 
 ```{r Prepare to read in data, include = FALSE}
+# metadata file created with create_metadata.R
+metadata <- read.table(here("intermediate_files/metadata/metadata_all_samples.txt"), row.names = 1, sep = "\t")
+metadata_no_inhouse <- read.table(here("intermediate_files/metadata/metadata_no_inhouse.txt"), row.names = 1, sep = "\t")
+metadata_no_inhouse_no6144 <- read.table(here("intermediate_files/metadata/metadata_no_inhouse_without_6144.txt"), row.names = 1, sep = "\t")
 files <- file.path(metadata$directory, rownames(metadata), "quant.sf")
 coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study, 
                       Subpopulation = metadata$Subpopulation, 
@@ -212,15 +145,16 @@ dds <- DESeqDataSet(se, design = ~1)
 keep <- rowSums(counts(dds)) >= 10
 # only keep rows (genes) for which keep is TRUE
 dds <- dds[keep,]
-# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
-X <- 7
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds))
+#X <- 7
 keep <- rowSums(counts(dds) >= 10) >= X
 dds <- dds[keep,]
 vsd <- vst(dds, blind = TRUE)
 ```
 
 ```{r Apply common filters according to DESeq2 vignette to remove lowly expressed genes}
-# do no design for the time being, Subpopulation + Batch gives error - model matrix not full rank
+# do no design for the time being, Subpopulation + Batch gives error - model matrix not full rank in DESeq2
 # this function stores input values, intermediate calculations and results of DE analysis - makes counts non-negative integers
 dds_no_inhouse <- DESeqDataSet(se_no_inhouse, design = ~1)
 
@@ -228,8 +162,9 @@ dds_no_inhouse <- DESeqDataSet(se_no_inhouse, design = ~1)
 keep <- rowSums(counts(dds_no_inhouse)) >= 10
 # only keep rows (genes) for which keep is TRUE
 dds_no_inhouse <- dds_no_inhouse[keep,]
-# at least X samples with a count of 10 or more, where X can be chosen as the sample size of the smallest group of samples
-X <- 7
+# at least X samples with a count of 10 or more, where X is 5% of samples
+X <- round(0.05*ncol(dds_no_inhouse))
+#X <- 7
 keep <- rowSums(counts(dds_no_inhouse) >= 10) >= X
 dds_no_inhouse <- dds_no_inhouse[keep,]
 ```
@@ -243,12 +178,72 @@ For consistency between the DESeq2 `plotPCA` function (which by default takes th
 ```{r}
 plotPCA(vsd, intgroup = c("Subpopulation"), ntop = nrow(vsd))
 plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd))
+plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd))
+
 ```
 
-```{r, include = FALSE}
+There seems to be 4 groups of samples here: the samples at PC1 < -100 which look like outliers, the main group in the middle (-100 < PC1 < 50) and then 2 groups which separate on PC2. One of these groups comes completely from one batch (EGAD00001005744) which is purely tumour CAFs and the other is a mixture of our in-house samples and study EGAD00001006144. There is clear separation between the in-house samples and EGAD00001006144, so perhaps they could be called one cluster. The in-house samples underwent culturing in a medium to promote the growth of fibroblastic cells, whereas the EGAD00001006144 samples either underwent separation by sorting or spreading. It is possible that there are similarities in the conditions under which the samples were kept which altered their transcriptomic properties.
+
+We can see that there are 16 samples that explain much of the variation in PC1, meaning that they are quite different from the other samples. Let's have a look at the PCA loadings using the `biplot` from `PCATools`.
+
+It is important to note here that our interpretation of the PCA is subjective, and can change depending on the number of highly variable genes we consider when carrying out PCA.
+
+
+```{r Variance stabilising transformation and PCA on full dataset}
 vsd_mat <- assay(vsd)
 metadata_pca <- metadata[,1:4]
 p <- pca(vsd_mat, metadata = metadata_pca)
+```
+
+
+```{r Biplot}
+biplot(p, showLoadings = T, lab = NULL)
+```
+
+There seems to be 10 genes that are associated with PC2, separating our main cluster and the In-house/EGAD00001006144. samples.
+
+* FOS
+  + Proto-oncogene, forms part of TF complex, regulators of cell proliferation, differentiation, transformation, apoptosis.
+* APOD
+  + Apolipoprotein D, encodes part of HDL
+  + Expression induced in quiescent/senescent fibroblasts [@Rassart2020], and so may inhibit cell growth
+  + Downregulated in CAFs in our initial CAF vs TAN DE analysis
+* TMEM176B
+  + A transmembrane protein
+  + Identified as LR8 in 1999 [@Lurton1999] and was proposed as a marker for fibroblasts and their subpopulations.
+  + It has recently been found to be important in the AKT/mTOR pathway, which is involved in cell proliferation (and hence can be implicated in cancer) [@Kang2021].
+* SELENOP
+  + Selenoprotein P
+  + Increased expression stops conversion of fibroblasts to myofibroblasts [@Short2017]
+* PLXDC1
+  + Plexin Domain Containing 1
+  + Involved in angiogenesis
+  + Cell surface receptor for Pigment Epithelium Derived Factor [@Cheng2014]
+* P4HB
+  + Protein disulfide isomerase
+  + Possible fibroblast marker [@Wetzig2013]
+* CHPF
+  + Chondroitin polymerising factor
+  + Alters the formation of chondroitin sulphate in breast cancer. Chondroitin sulphate forms "abnormal" chains in breast cancer [@Liao2021]
+* CEMIP
+  + Cell Migration Inducing Hyaluronidase 1
+  + WNT-related [@Dong2021]
+  + High expression associated with malignancy and increased CAF infiltration [@Dong2021]. Possible biomarker. Dong study looked at expression in tumour cells, here we can see that its expression seems to change between different groups of CAFs too.
+* TFPI2
+  + Tissue factor pathway inhibitor 2.
+  + Serine proteinase
+  + Tumour suppressor
+  + Inhibits plasmin, thereby inhibiting the activation of MMPs
+  + Increased expression of TFPI2 in cancer cells downregulates the expression of MMPs in CAFs (the opposite is the case too) [@Gaud2011].
+* GREM1
+  + Antagonist of BMP, playing a role in tissue differentiation.
+  + Expressed in basal cell carcinoma CAF myofibroblasts [@Kim2017].
+  + Expression of GREM1 derived from CAFs thought to promote cancer progression [@Ren2019].
+  + Found to be expressed in CAF cell lines but not in breast cancer cell lines [@Ren2019].
+  + Its expression in bulk tumour samples is correlated with the expression of CAF markers such as FAP [@Ren2019].
+  
+```{r, include = FALSE}
+
 peigencor <- eigencorplot(p,
     components = getComponents(p, 1:10),
     metavars = colnames(metadata_pca),
@@ -289,6 +284,120 @@ ppairs <- pairsplot(p, components = getComponents(p, c(1:3)),
 ```{r}
 ppairs
 ```
+## Test out removal of samples that are outliers on PCA
+
+```{r}
+rv <- rowVars(assay(vsd))
+pc <- prcomp(t(assay(vsd)[head(order(-rv),nrow(assay(vsd))),]))
+plot(pc$x[,1:2])
+
+idx <- pc$x[,1] < -110
+sum(idx)
+plot(pc$x[,1:2], col=idx+1, pch=20, asp=1)
+outliers_1 <- which(idx == TRUE)
+```
+### Clinical correlations by outlier status
+
+```{r}
+metadata_pca$Outlier <- ifelse(idx, "Yes", "No")
+p <- pca(vsd_mat, metadata = metadata_pca)
+peigencor <- eigencorplot(p,
+    components = getComponents(p, 1:10),
+    metavars = colnames(metadata_pca),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+```{r}
+peigencor
+```
+
+
+```{r}
+patient_samples <- rownames(metadata)
+patient_samples <- patient_samples[!idx]
+dds_remove_outliers <- dds[,!idx]
+vsd_remove_outliers <- vst(dds_remove_outliers, blind = TRUE)
+vsd_remove_outliers_mat <- assay(vsd_remove_outliers)
+```
+
+```{r}
+plotPCA(vsd_remove_outliers, intgroup = c("Subpopulation"), ntop = nrow(vsd_remove_outliers))
+plotPCA(vsd_remove_outliers, intgroup = c("Study"), ntop = nrow(vsd_remove_outliers))
+plotPCA(vsd_remove_outliers, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_remove_outliers))
+
+```
+
+```{r}
+metadata_pca_remove_outliers <- colData(vsd_remove_outliers)[,2:4]
+#metadata_pca_remove_outliers <- as.data.frame(metadata_pca_remove_outliers[!names(metadata_pca_remove_outliers) %in% c("names")])
+p_remove_outliers <- pca(vsd_remove_outliers_mat, metadata = metadata_pca_remove_outliers)
+peigencor_remove_outliers <- eigencorplot(p_remove_outliers,
+    components = getComponents(p_remove_outliers, 1:10),
+    metavars = colnames(metadata_pca_remove_outliers),
+    col = c('white', 'cornsilk1', 'gold', 'forestgreen', 'darkgreen'),
+    cexCorval = 0.7,
+    colCorval = 'black',
+    fontCorval = 2,
+    posLab = 'bottomleft',
+    rotLabX = 45,
+    posColKey = 'top',
+    cexLabColKey = 1.5,
+    scale = TRUE,
+    corFUN = 'pearson',
+    #corUSE = 'pairwise.complete.obs',
+    corUSE = 'pairwise.complete.obs',
+    corMultipleTestCorrection = 'none',
+    main = 'PCs clinical correlations without\nOutliers',
+    colFrame = 'white',
+    plotRsquared = TRUE)
+```
+
+```{r}
+peigencor_remove_outliers
+```
+Now that the outliers have been removed, batch accounts for most of the variability in PC1
+
+How many of each subpopulation do we have left?
+
+```{r}
+table(colData(dds)$Subpopulation)
+table(colData(dds_remove_outliers)$Subpopulation)
+```
+
+## Remove batch effects after outlier removal
+
+```{r Batch correction only include batch and covariates}
+counts_matrix_remove_outliers <- assay(dds_remove_outliers)
+batch_remove_outliers <- colData(dds_remove_outliers)$Study
+adjusted_remove_outliers <- ComBat_seq(counts = counts_matrix_remove_outliers, batch = batch_remove_outliers, group = colData(dds_remove_outliers)$Tumor_JuxtaTumor)
+```
+
+```{r}
+dds_batch_corrected <- DESeqDataSetFromMatrix(adjusted_all_samples, colData = metadata, design = ~1)
+# not sure about the blind = FALSE here
+vsd_batch_corrected <- vst(dds_batch_corrected, blind = FALSE)
+```
+
+```{r PC1 vs PC2 batch corrected no covariate}
+plotPCA(vsd_batch_corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected))
+plotPCA(vsd_batch_corrected, intgroup = c("Study"), ntop = nrow(vsd_batch_corrected))
+plotPCA(vsd_batch_corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected))
+
+```
 
 ## PCA + clinical correlations without In-House data
 
@@ -300,6 +409,8 @@ vsd_mat_no_inhouse <- assay(vsd_no_inhouse)
 ```{r}
 plotPCA(vsd_no_inhouse, intgroup = c("Subpopulation"), ntop = nrow(vsd_no_inhouse))
 plotPCA(vsd_no_inhouse, intgroup = c("Study"), ntop = nrow(vsd_no_inhouse))
+plotPCA(vsd_no_inhouse, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_no_inhouse))
+
 ```
 
 ```{r}
@@ -331,7 +442,7 @@ peigencor_no_inhouse <- eigencorplot(p_no_inhouse,
 peigencor_no_inhouse
 ```
 
-Here we can see strandedness (i.e. the study `EGAD00001006144`) is significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4% of the variance of the entire dataset respectively).
+Here we can see strandedness (i.e. the study `EGAD00001006144`) is significantly correlated with PCs 1-3. These PCs explain 29%, 7% and 5% of the variance of the entire dataset respectively).
 
 ```{r, include=FALSE}
 ppairs <- pairsplot(p_no_inhouse, components = getComponents(p_no_inhouse, c(1:3)),
@@ -372,6 +483,8 @@ vsd_no_inhouse_no_6144 <- vst(dds_no_inhouse_no_6144, blind = TRUE)
 ```{r PC1 vs PC2 without study 6144 or inhouse data}
 plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Subpopulation"), ntop = nrow(vsd_no_inhouse_no_6144))
 plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Study"), ntop = nrow(vsd_no_inhouse_no_6144))
+plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_no_inhouse_no_6144))
+
 ```
 
 ```{r, include = FALSE}
@@ -395,7 +508,7 @@ peigencor_reduced <- eigencorplot(p_no_inhouse_no6144,
     #corUSE = 'pairwise.complete.obs',
     corUSE = 'pairwise.complete.obs',
     corMultipleTestCorrection = 'none',
-    main = 'PCs clinical correlations remove EGAD00001006144',
+    main = 'PCs clinical correlations\nremove EGAD00001006144',
     colFrame = 'white',
     plotRsquared = TRUE)
 
@@ -443,7 +556,7 @@ ppairs_no_6144_colour_subpop
 
 ## Combat-Seq
 
-Combat-Seq models the distribution for each gene using a negative binomial regression model. This model contains mean and dispersion parameter. The model allows us to preserve changes in counts due to biological condition after adjustment. However, in our case, it is not possible to guarantee the preservation of changes due to biological condition (CAF subpopulation) while removing batch effects. Here we carry out batch correction using Combat-Seq, and will look at the data after adjustment to see if biological condition is preserved after adjustment. We should note here that the S3 subpopulation does not separate well from the other subpopulations before batch correction, even though the S3 data comes from a different "study".
+Combat-Seq [@Zhang2020] models the distribution for each gene using a negative binomial regression model. This model contains a mean and dispersion parameter. It allows us to preserve changes in counts due to biological condition after adjustment. However, in our case, it is not possible to guarantee the preservation of changes due to biological condition (CAF subpopulation) while removing batch effects. Here we carry out batch correction using Combat-Seq, and will look at the data after adjustment to see if biological condition is preserved after adjustment. We should note here that the S3 subpopulation does not separate well from the other subpopulations before batch correction, even though the S3 data comes from a different "study".
 
 ### Combat-Seq no clinical covariates
 
@@ -460,6 +573,8 @@ vsd_batch_corrected <- vst(dds_batch_corrected, blind = FALSE)
 ```{r PC1 vs PC2 batch corrected no covariate}
 plotPCA(vsd_batch_corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd_batch_corrected))
 plotPCA(vsd_batch_corrected, intgroup = c("Study"), ntop = nrow(vsd_batch_corrected))
+plotPCA(vsd_batch_corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected))
+
 ```
 
 ```{r, include = FALSE}
@@ -701,6 +816,8 @@ not_S3 <- colMeans(mod_mat[dds_no_inhouse_no_6144_deseq$Subpopulation %in% c("S1
 not_S4 <- colMeans(mod_mat[dds_no_inhouse_no_6144_deseq$Subpopulation %in% c("S1", "S3"),])
 ```
 
+From the DESeq2 paper (thanks to Dónal for pointing it out) - the default null hypothesis with the `results` function is that the actual log fold change is exactly zero. This is not likely to be biologically significant. What we often do is extract genes with a lfc greater than a certain threshold, e.g. LFC >=2. However, there is a better way of doing this. We can incorporate our threshold into the test itself, i.e. we can test if the actual LFC is greater than or equal to 2, and then our adjusted P-values will be with respect to this new null hypothesis. 
+
 ```{r Extract results for each pairwise contrast}
 res_not_S1 <- results(dds_no_inhouse_no_6144_deseq, contrast = S1 - not_S1, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
 res_not_S3 <- results(dds_no_inhouse_no_6144_deseq, contrast = S3 - not_S3, filterFun = ihw, alpha = 0.05, lfcThreshold = 2, altHypothesis = "greater")
@@ -747,7 +864,7 @@ dds_inhouse <- dds[,idx]
 ```
 
 ```{r}
-inhouse_metadata <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/metadata/reformat_samples_extra_info.csv")
+inhouse_metadata <- read.csv(here("intermediate_files/metadata/reformat_samples_extra_info.csv"))
 caf_es <- gsva(expr = dds_inhouse,
                gset.idx.list = genesets,
                method = "gsva",
@@ -995,11 +1112,11 @@ results_combined
 The HGNCHelper package can be used to fix outdated gene symbols.
 
 ```{r read in gene signatures, include=FALSE}
-gene_signature <- read.csv("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/1-s2.0-S0092867418300448-mmc1.csv", skip = 1)
+gene_signature <- read.csv(here("1-s2.0-S0092867418300448-mmc1.csv"), skip = 1)
 gene_signature_loc <- gene_signature[str_detect(gene_signature$Gene.name, pattern = "^LOC\\d+$"),]
 # write to file and look up loc gene signatures manually, read back in as gene_signature_loc_official
 #write.table(gene_signature_loc, file = "/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc.txt", quote = F, row.names = F)
-gene_signature_loc_official <- read.table("/home/kevin/Documents/PhD/rna_seq_bc/gene_signature/chemo_signature_loc_official_names.txt", header = T)
+gene_signature_loc_official <- read.table(here("intermediate_files/chemo_signature_loc_official_names.txt"), header = T)
 gene_signature_proper_names <- gene_signature
 gene_signature_proper_names$Official_name <- gene_signature$Gene.name
 idx <- match(gene_signature_loc$Gene.name, gene_signature$Gene.name)
@@ -1165,14 +1282,14 @@ docker run -v /home/kevin/Documents/PhD/cibersort/caf_subpopulation/infiles:/src
 ```
 
 ```{r CIBERSORT initial results Docker}
-cibersort_results <- read.table("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/CIBERSORTx_Adjusted.txt", header = T)
+cibersort_results <- read.table(here("intermediate_files/cibersort/CIBERSORTx_Adjusted.txt"), header = T)
 cibersort_results
 ```
 
 The online version of CIBERSORTx was also used, using 500 permutations. The study `EGAD00001006144` was excluded from the signature matrix due to its probable outlier status.
 
 ```{r CIBERSORTx online results}
-cibersort_results_online <- read.csv("/home/kevin/Documents/PhD/cibersort/caf_subpopulation/outfiles/online/2022-09-01-CIBERSORTx_Job6_Results_online_no6144_hgnc.csv", header = T)
+cibersort_results_online <- read.csv(here("intermediate_files/cibersort/2022-09-01-CIBERSORTx_Job6_Results_online_no6144_hgnc.csv"), header = T)
 cibersort_results_online 
 ```
 
@@ -1223,7 +1340,7 @@ cibersort_grid <- plot_grid(cibersort_plot_online + theme(legend.position = "non
       align = 'h')
 cibersort_grid <- plot_grid(cibersort_grid, legend, rel_widths = c(3,.5))
 
-ggsave(filename = "/home/kevin/Documents/PhD/rna_seq_bc/images_for_presentation/cibersort_plot.png", 
+ggsave(filename = here("outfiles/cibersort_plot.png"), 
        plot = cibersort_grid,
        width = 20,
        height = 10,

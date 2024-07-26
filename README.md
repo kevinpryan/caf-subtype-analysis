@@ -1,7 +1,7 @@
 CAF Subpopulation Analysis
 ================
 Kevin Ryan
-2022-09-07 17:48:16
+2022-09-08 18:54:36
 
 - <a href="#introduction" id="toc-introduction">Introduction</a>
 - <a href="#preparation" id="toc-preparation">Preparation</a>
@@ -254,7 +254,7 @@ vsd <- vst(dds, blind = TRUE)
     ## using 'avgTxLength' from assays(dds), correcting for library size
 
 ``` r
-# do no design for the time being, Subpopulation + Batch gives error - model matrix not full rank
+# do no design for the time being, Subpopulation + Batch gives error - model matrix not full rank in DESeq2
 # this function stores input values, intermediate calculations and results of DE analysis - makes counts non-negative integers
 dds_no_inhouse <- DESeqDataSet(se_no_inhouse, design = ~1)
 ```
@@ -293,6 +293,100 @@ plotPCA(vsd, intgroup = c("Study"), ntop = nrow(vsd))
 ![](README_files/figure-gfm/unnamed-chunk-1-2.png)<!-- -->
 
 ``` r
+plotPCA(vsd, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-1-3.png)<!-- --> There seems
+to be 4 groups of samples here: the samples at PC1 \< -100 which look
+like outliers, the main group in the middle (-100 \< PC1 \< 50) and then
+2 groups which separate on PC2. One of these groups comes completely
+from one batch (EGAD00001005744) which is purely tumour CAFs and the
+other is a mixture of our in-house samples and study EGAD00001006144.
+There is clear separation between the in-house samples and
+EGAD00001006144, so perhaps they could be called one cluster. The
+in-house samples underwent culturing in a medium to promote the growth
+of fibroblastic cells, whereas the EGAD00001006144 samples either
+underwent separation by sorting or spreading. It is possible that there
+are similarities in the conditions under which the samples were kept
+which altered their transcriptomic properties.
+
+We can see that there are 16 samples that explain much of the variation
+in PC1, meaning that they are quite different from the other samples.
+Let’s have a look at the PCA loadings using the `biplot` from
+`PCATools`.
+
+``` r
+vsd_mat <- assay(vsd)
+metadata_pca <- metadata[,1:4]
+p <- pca(vsd_mat, metadata = metadata_pca)
+```
+
+``` r
+biplot(p, showLoadings = T, lab = NULL)
+```
+
+![](README_files/figure-gfm/Biplot-1.png)<!-- -->
+
+There seems to be 10 genes that are associated with PC2, separating our
+main cluster and the In-house/EGAD00001006144. samples.
+
+- FOS
+  - Proto-oncogene, forms part of TF complex, regulators of cell
+    proliferation, differentiation, transformation, apoptosis.
+- APOD
+  - Apolipoprotein D, encodes part of HDL
+  - Expression induced in quiescent/senescent fibroblasts (Rassart et
+    al. 2020), and so may inhibit cell growth
+  - Downregulated in CAFs in our initial CAF vs TAN DE analysis
+- TMEM176B
+  - A transmembrane protein
+  - Identified as LR8 in 1999 (Lurton et al. 1999) and was proposed as a
+    marker for fibroblasts and their subpopulations.
+  - It has recently been found to be important in the AKT/mTOR pathway,
+    which is involved in cell proliferation (and hence can be implicated
+    in cancer) (Kang et al. 2021).
+- SELENOP
+  - Selenoprotein P
+  - Increased expression stops conversion of fibroblasts to
+    myofibroblasts (Short and Williams 2017)
+- PLXDC1
+  - Plexin Domain Containing 1
+  - Involved in angiogenesis
+  - Cell surface receptor for Pigment Epithelium Derived Factor (Cheng
+    et al. 2014)
+- P4HB
+  - Protein disulfide isomerase
+  - Possible fibroblast marker (Wetzig et al. 2013)
+- CHPF
+  - Chondroitin polymerising factor
+  - Alters the formation of chondroitin sulphate in breast cancer.
+    Chondroitin sulphate forms “abnormal” chains in breast cancer (Liao
+    et al. 2021)
+- CEMIP
+  - Cell Migration Inducing Hyaluronidase 1
+  - WNT-related (Dong et al. 2021)
+  - High expression associated with malignancy and increased CAF
+    infiltration (Dong et al. 2021). Possible biomarker. Dong study
+    looked at expression in tumour cells, here we can see that its
+    expression seems to change between different groups of CAFs too.
+- TFPI2
+  - Tissue factor pathway inhibitor 2.
+  - Serine proteinase
+  - Tumour suppressor
+  - Inhibits plasmin, thereby inhibiting the activation of MMPs
+  - Increased expression of TFPI2 in cancer cells downregulates the
+    expression of MMPs in CAFs (the opposite is the case too) (Gaud et
+    al. 2011).
+- GREM1
+  - Antagonist of BMP, playing a role in tissue differentiation.
+  - Expressed in basal cell carcinoma CAF myofibroblasts (Kim et al.
+    2017).
+  - Expression of GREM1 derived from CAFs thought to promote cancer
+    progression (Ren et al. 2019).
+  - Found to be expressed in CAF cell lines but not in breast cancer
+    cell lines (Ren et al. 2019).
+
+``` r
 peigencor
 ```
 
@@ -317,6 +411,12 @@ plotPCA(vsd_no_inhouse, intgroup = c("Study"), ntop = nrow(vsd_no_inhouse))
 ```
 
 ![](README_files/figure-gfm/unnamed-chunk-7-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_no_inhouse, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_no_inhouse))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-7-3.png)<!-- -->
 
 ``` r
 metadata_pca_no_inhouse <- colData(vsd_no_inhouse)[,1:5]
@@ -366,7 +466,7 @@ peigencor_no_inhouse
 ![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 Here we can see strandedness (i.e. the study `EGAD00001006144`) is
-significantly correlated with PCs 1-3. These PCs explain 28%, 8% and 4%
+significantly correlated with PCs 1-3. These PCs explain 29%, 7% and 5%
 of the variance of the entire dataset respectively).
 
 ``` r
@@ -399,6 +499,12 @@ plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Study"), ntop = nrow(vsd_no_inhous
 ![](README_files/figure-gfm/PC1%20vs%20PC2%20without%20study%206144%20or%20inhouse%20data-2.png)<!-- -->
 
 ``` r
+plotPCA(vsd_no_inhouse_no_6144, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_no_inhouse_no_6144))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20without%20study%206144%20or%20inhouse%20data-3.png)<!-- -->
+
+``` r
 peigencor_reduced
 ```
 
@@ -420,17 +526,18 @@ ppairs_no_6144_colour_subpop
 
 ## Combat-Seq
 
-Combat-Seq models the distribution for each gene using a negative
-binomial regression model. This model contains mean and dispersion
-parameter. The model allows us to preserve changes in counts due to
-biological condition after adjustment. However, in our case, it is not
-possible to guarantee the preservation of changes due to biological
-condition (CAF subpopulation) while removing batch effects. Here we
-carry out batch correction using Combat-Seq, and will look at the data
-after adjustment to see if biological condition is preserved after
-adjustment. We should note here that the S3 subpopulation does not
-separate well from the other subpopulations before batch correction,
-even though the S3 data comes from a different “study”.
+Combat-Seq (Zhang, Parmigiani, and Johnson 2020) models the distribution
+for each gene using a negative binomial regression model. This model
+contains a mean and dispersion parameter. It allows us to preserve
+changes in counts due to biological condition after adjustment. However,
+in our case, it is not possible to guarantee the preservation of changes
+due to biological condition (CAF subpopulation) while removing batch
+effects. Here we carry out batch correction using Combat-Seq, and will
+look at the data after adjustment to see if biological condition is
+preserved after adjustment. We should note here that the S3
+subpopulation does not separate well from the other subpopulations
+before batch correction, even though the S3 data comes from a different
+“study”.
 
 ### Combat-Seq no clinical covariates
 
@@ -470,6 +577,12 @@ plotPCA(vsd_batch_corrected, intgroup = c("Study"), ntop = nrow(vsd_batch_correc
 ```
 
 ![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20no%20covariate-2.png)<!-- -->
+
+``` r
+plotPCA(vsd_batch_corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd_batch_corrected))
+```
+
+![](README_files/figure-gfm/PC1%20vs%20PC2%20batch%20corrected%20no%20covariate-3.png)<!-- -->
 
 ``` r
 peigencor_batch_corrected
@@ -1516,6 +1629,16 @@ look different between the two methods, with the GUI predicting about
 
 <div id="refs" class="references csl-bib-body hanging-indent">
 
+<div id="ref-Cheng2014" class="csl-entry">
+
+Cheng, Guo, Ming Zhong, Riki Kawaguchi, Miki Kassai, Muayyad Al-Ubaidi,
+Jun Deng, Mariam Ter-Stepanian, and Hui Sun. 2014. “<span
+class="nocase">Identification of PLXDC1 and PLXDC2 as the transmembrane
+receptors for the multifunctional factor PEDF</span>.” *eLife* 3:
+e05401. <https://doi.org/10.7554/ELIFE.05401>.
+
+</div>
+
 <div id="ref-Chu2022" class="csl-entry">
 
 Chu, Tinyi, Zhong Wang, Dana Pe’er, and Charles G. Danko. 2022. “<span
@@ -1523,6 +1646,38 @@ class="nocase">Cell type and gene expression deconvolution with
 BayesPrism enables Bayesian integrative analysis across bulk and
 single-cell RNA sequencing in oncology</span>.” *Nature Cancer 2022 3:4*
 3 (4): 505–17. <https://doi.org/10.1038/s43018-022-00356-3>.
+
+</div>
+
+<div id="ref-Dong2021" class="csl-entry">
+
+Dong, Xingxing, Yalong Yang, Qianqian Yuan, Jinxuan Hou, and Gaosong Wu.
+2021. “<span class="nocase">High Expression of CEMIP Correlates Poor
+Prognosis and the Tumur Microenvironment in Breast Cancer as a
+Promisingly Prognostic Biomarker</span>.” *Frontiers in Genetics* 12
+(December): 2512. <https://doi.org/10.3389/FGENE.2021.768140/BIBTEX>.
+
+</div>
+
+<div id="ref-Gaud2011" class="csl-entry">
+
+Gaud, Guillaume, Sophie Iochmann, Audrey Guillon-Munos, Benjamin
+Brillet, Stéphanie Petiot, Florian Seigneuret, Antoine Touzé, et al.
+2011. “<span class="nocase">TFPI-2 silencing increases tumour
+progression and promotes metalloproteinase 1 and 3 induction through
+tumour-stromal cell interactions</span>.” *Journal of Cellular and
+Molecular Medicine* 15 (2): 196.
+<https://doi.org/10.1111/J.1582-4934.2009.00989.X>.
+
+</div>
+
+<div id="ref-Kang2021" class="csl-entry">
+
+Kang, Chifei, Ran Rostoker, Sarit Ben-Shumel, Rola Rashed, James Andrew
+Duty, Deniz Demircioglu, Irini M. Antoniou, et al. 2021. “<span
+class="nocase">Tmem176b regulates akt/mtor signaling and tumor growth in
+triple-negative breast cancer</span>.” *Cells* 10 (12): 3430.
+<https://doi.org/10.3390/CELLS10123430/S1>.
 
 </div>
 
@@ -1537,6 +1692,16 @@ to immunotherapy resistance in cancer</span>.” *Cancer Discovery* 10
 
 </div>
 
+<div id="ref-Kim2017" class="csl-entry">
+
+Kim, Hye Sung, Myung Soo Shin, Min Seok Cheon, Jae Wang Kim, Cheol Lee,
+Woo Ho Kim, Young Sill Kim, and Bo Gun Jang. 2017. “<span
+class="nocase">GREM1 is expressed in the cancer-associated
+myofibroblasts of basal cell carcinomas</span>.” *PLoS ONE* 12 (3).
+<https://doi.org/10.1371/JOURNAL.PONE.0174565>.
+
+</div>
+
 <div id="ref-Li2022" class="csl-entry">
 
 Li, Yumei, Xinzhou Ge, Fanglue Peng, Wei Li, and Jingyi Jessica Li.
@@ -1544,6 +1709,28 @@ Li, Yumei, Xinzhou Ge, Fanglue Peng, Wei Li, and Jingyi Jessica Li.
 differential expression methods when analyzing human population
 samples</span>.” *Genome Biology* 23 (1): 1–13.
 <https://doi.org/10.1186/S13059-022-02648-4/FIGURES/2>.
+
+</div>
+
+<div id="ref-Liao2021" class="csl-entry">
+
+Liao, Wen-Chieh, Hung-Rong Yen, Chia-Hua Chen, Yin-Hung Chu, Ying-Chyi
+Song, To-Jung Tseng, and Chiung-Hui Liu. 2021. “<span
+class="nocase">CHPF promotes malignancy of breast cancer cells by
+modifying syndecan-4 and the tumor microenvironment</span>.” *American
+Journal of Cancer Research* 11 (3): 812. [/pmc/articles/PMC7994168/
+/pmc/articles/PMC7994168/?report=abstract
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7994168/](/pmc/articles/PMC7994168/ /pmc/articles/PMC7994168/?report=abstract https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7994168/).
+
+</div>
+
+<div id="ref-Lurton1999" class="csl-entry">
+
+Lurton, J., T. M. Rose, G. Raghu, and A. S. Narayanan. 1999. “<span
+class="nocase">Isolation of a Gene Product Expressed by a Subpopulation
+of Human Lung Fibroblasts by Differential Display</span>.” *American
+Journal of Respiratory Cell and Molecular Biology* 20 (2): 327–31.
+<https://doi.org/10.1165/AJRCMB.20.2.3368>.
 
 </div>
 
@@ -1578,6 +1765,33 @@ mechanisms</span>.” *Nature Communications 2020 11:1* 11 (1): 1–20.
 
 </div>
 
+<div id="ref-Rassart2020" class="csl-entry">
+
+Rassart, Eric, Frederik Desmarais, Ouafa Najyb, Karl F. Bergeron, and
+Catherine Mounier. 2020. “Apolipoprotein D.” *Gene* 756 (September):
+144874. <https://doi.org/10.1016/J.GENE.2020.144874>.
+
+</div>
+
+<div id="ref-Ren2019" class="csl-entry">
+
+Ren, Jiang, Marcel Smid, Josephine Iaria, Daniela C. F. Salvatori, Hans
+Van Dam, Hong Jian Zhu, John W. M. Martens, and Peter Ten Dijke. 2019.
+“<span class="nocase">Cancer-associated fibroblast-derived Gremlin 1
+promotes breast cancer progression</span>.” *Breast Cancer Research* 21
+(1): 1–19. <https://doi.org/10.1186/S13058-019-1194-0/FIGURES/7>.
+
+</div>
+
+<div id="ref-Short2017" class="csl-entry">
+
+Short, Sarah P., and Christopher S. Williams. 2017. “<span
+class="nocase">Selenoproteins in tumorigenesis and cancer
+progression</span>.” *Advances in Cancer Research* 136: 49.
+<https://doi.org/10.1016/BS.ACR.2017.08.002>.
+
+</div>
+
 <div id="ref-Su2018" class="csl-entry">
 
 Su, Shicheng, Jianing Chen, Herui Yao, Jiang Liu, Shubin Yu, Liyan Lao,
@@ -1595,6 +1809,25 @@ Magdalena Feldhahn, and Oliver Kohlbacher. 2014. “<span
 class="nocase">OptiType: precision HLA typing from next-generation
 sequencing data</span>.” *Bioinformatics* 30 (23): 3310–16.
 <https://doi.org/10.1093/BIOINFORMATICS/BTU548>.
+
+</div>
+
+<div id="ref-Wetzig2013" class="csl-entry">
+
+Wetzig, Andrew, Ayodele Alaiya, Monther Al-Alwan, Christian B. Pradez,
+Manogaran S. Pulicat, Amer Al-Mazrou, Zakia Shinwari, et al. 2013.
+“<span class="nocase">Differential marker expression by cultures rich in
+mesenchymal stem cells</span>.” *BMC Cell Biology* 14 (1): 54.
+<https://doi.org/10.1186/1471-2121-14-54>.
+
+</div>
+
+<div id="ref-Zhang2020" class="csl-entry">
+
+Zhang, Yuqing, Giovanni Parmigiani, and W. Evan Johnson. 2020. “<span
+class="nocase">ComBat-seq: batch effect adjustment for RNA-seq count
+data</span>.” *NAR Genomics and Bioinformatics* 2 (3).
+<https://doi.org/10.1093/NARGAB/LQAA078>.
 
 </div>
 

@@ -1,0 +1,104 @@
+---
+title: "code i wanted to get rid of but didn't want to delete"
+author: "Kevin Ryan"
+date: "9/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# This code will not run on its own
+
+```{r}
+ann_colors = list(Study=c(EGAD00001004810 = "forestgreen",  EGAD00001003808 = "gold", EGAD00001006144 = "blue", EGAD00001005744 = "magenta3", InHouse = "black"),
+                  Subpopulation = c(S1 = "dodgerblue4", S3 = "chartreuse1", S4 = "grey67", Unknown = "palevioletred"),
+                  Tumor_JuxtaTumor = c(tumor = "royalblue", juxtatumor = "red"), Cluster = c("Cluster 1" = "blue", "Cluster 2" = "red", "Cluster 3" = "yellow") 
+                  )
+```
+
+```{r}
+# create heatmap as per deseq vignette Heatmap of the sample-to-sample distances
+# calculate euclidean distance between samples
+sampleDists <- dist(t(assay(vsd_batch_corrected_outliers_removed)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(vsd_batch_corrected_outliers_removed$Subpopulation, vsd_batch_corrected_outliers_removed$Tumor_JuxtaTumor, sep = "-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         fontsize_row = 5,
+         col=colors)
+```
+
+```{r}
+genes_interest <- c("FAP", "ITGB1", "ACTA2", "PDPN", "PDGFRB")
+genes_interest_common_names <- c("FAP", "CD29", "αSMA", "PDPN", "PDGFRB")
+genes_interest_vst <- assay(vsd_batch_corrected_outliers_removed)[genes_interest,]
+sampleDists <- dist(t(genes_interest_vst))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+metadata_pca_caf_genes <- colData(vsd_batch_corrected_outliers_removed)
+p_caf_genes <- pca(sampleDistMatrix, metadata = metadata_pca_caf_genes)
+biplot(p_caf_genes, showLoadings = T, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+set.seed(1)
+cl = kmeans(sampleDistMatrix,centers=3,nstart=10)$cluster
+metadata_pca_caf_genes$Cluster <- as.character(cl)
+p_caf_genes <- pca(sampleDistMatrix, metadata = metadata_pca_caf_genes)
+biplot(p_caf_genes, showLoadings = T, lab = NULL, colby = "Subpopulation", legendPosition = "right")
+biplot(p_caf_genes, showLoadings = T, lab = NULL, colby = "Cluster", legendPosition = "right")
+```
+
+
+```{r}
+my_hclust_samples <- hclust(sampleDists, method = "complete")
+my_samples_cut <- cutree(tree = my_hclust_samples, k = 3)
+my_samples_cut[my_samples_cut == 1] <- "Cluster 1"
+my_samples_cut[my_samples_cut == 2] <- "Cluster 2"
+my_samples_cut[my_samples_cut == 3] <- "Cluster 3"
+subset_coldata <- subset(colData(vsd_batch_corrected_outliers_removed), select = -c(sizeFactor))
+subset_coldata$names <- NULL
+subset_coldata$Cluster <- my_samples_cut
+
+pheatmap(sampleDistMatrix,
+         #clustering_distance_rows=sampleDists,
+         #clustering_distance_cols=sampleDists,
+         kmeans_k = 3,
+         fontsize_row = 5,
+         #annotation_col = subset_coldata,
+         col=colors)
+```
+
+```{r Generate distance matrix + generate heatmap}
+# find euclidean distance between samples for heatmap generation (normalised data)
+my_hclust_samples <- hclust(sampleDists, method = "complete")
+my_samples_cut <- cutree(tree = my_hclust_samples, k = 3)
+my_samples_cut[my_samples_cut == 1] <- "Cluster 1"
+my_samples_cut[my_samples_cut == 2] <- "Cluster 2"
+my_samples_cut[my_samples_cut == 3] <- "Cluster 3"
+
+#my_clusters <- data.frame(cluster = my_samples_cut)
+
+# don't want files column to be on heatmap
+subset_coldata <- subset(colData(vsd_batch_corrected_outliers_removed), select = -c(sizeFactor))
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(subset_coldata) <- subset_coldata$names
+subset_coldata$names <- NULL
+subset_coldata$Cluster <- my_samples_cut
+
+pheatmap(mat=sampleDistMatrix,
+         show_rownames = FALSE,
+         cluster_cols = TRUE,
+         cluster_rows = TRUE,
+         show_colnames = FALSE,
+         annotation_col = subset_coldata,
+         annotation_colors = ann_colors,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colorRampPalette( rev(brewer.pal(9, "Blues")) )(255))
+
+#pheatmap(assay(vsd_batch_corrected_outliers_removed))
+```

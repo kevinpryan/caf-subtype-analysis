@@ -19,6 +19,7 @@ library(DESeq2)
 library(ggplot2)
 library(PCAtools)
 library(sva)
+library(ggpubr) # for multi-panel figures
 ```
 
 # Read in data
@@ -72,6 +73,8 @@ coldata <- data.frame(files, names=rownames(metadata), Study = metadata$Study,
 # tx2gene but using the hgnc symbol instead of ensembl gene id version
 mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl", host="https://www.ensembl.org")
                 #host="uswest.ensembl.org")
+
+## NO, SHOULDN'T USE BIOMART FOR THIS - USE GTF FILE AS ID VERSIONS HAVE CHANGED!
 tx2gene.hgnc <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
 tx2gene.ensg.version <- getBM(attributes = c("ensembl_transcript_id_version", "ensembl_gene_id_version"), mart = mart, useCache = FALSE)
 ```
@@ -116,15 +119,30 @@ We can see that there are 16 samples that explain much of the variation in PC1, 
 It is important to note here that our interpretation of the PCA is subjective, and can change depending on the number of highly variable genes we consider when carrying out PCA.
 
 ```{r PCA ensembl}
-plotPCA(vsd.ensg, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg)) + 
-    ggtitle("PCA using Ensembl gene ID version")
+library(RColorBrewer)
+pca_before_correction_subpop <- plotPCA(vsd.ensg, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg)) + 
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Subpopulation")  +
+  ggtitle("Original data") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
 
-plotPCA(vsd.ensg, intgroup = c("Study"), ntop = nrow(vsd.ensg)) +
-    ggtitle("PCA using Ensembl gene ID version")
+pca_before_correction_subpop
+
+pca_before_correction_study <- plotPCA(vsd.ensg, intgroup = c("Study"), ntop = nrow(vsd.ensg)) +
+    #ggtitle("PCA using Ensembl gene ID version") +
+  theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Study") +
+  ggtitle("Original data") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_before_correction_subpop
 
 plotPCA(vsd.ensg, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.ensg)) + 
   ggtitle("PCA using Ensembl gene ID version")
 ```
+
 
 ```{r PCA on full dataset}
 vsd.mat.hgnc <- assay(vsd.hgnc)
@@ -346,15 +364,31 @@ vsd.ensg.remove.outliers.batch.corrected <- vst(dds.ensg.remove.outliers.batch.c
 
 
 ```{r PCA outliers removed}
-plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) + 
-    ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
 
-plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Study"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) +
-    ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
+
+pca_after_correction_subpopulation <- plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Subpopulation"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) + 
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Subpopulation")  +
+  ggtitle("Outliers removed and\nbatch-correction applied") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_after_correction_subpopulation
+
+pca_after_correction_study <- plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Study"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) +
+    theme(panel.background = element_blank(),
+        axis.line = element_line(colour = "black")) +
+labs(colour = "Study")  +
+  ggtitle("Outliers removed and\nbatch-correction applied") +
+    theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"))
+
+pca_after_correction_study
 
 plotPCA(vsd.ensg.remove.outliers.batch.corrected, intgroup = c("Tumor_JuxtaTumor"), ntop = nrow(vsd.ensg.remove.outliers.batch.corrected)) + 
   ggtitle("PCA using Ensembl gene ID version outliers removed batch corrected")
 ```
+
+
 
 ```{r Write to file hgnc}
 date <- Sys.Date()
@@ -580,6 +614,19 @@ eigencorplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.s
 
 ```{r}
 PCAtools::biplot(pca.counts.ensg.remove.outliers.batch.corrected.no.inhouse.remove.svs.sv8.sv6, lab = NULL, colby = "Subpopulation", legendPosition = 'right', title = "PCA plot coloured by Subpopulation of \nbatch-corrected data with surrogate variables\nremoved SV6 SV8")
+```
+
+### Combine PCA plots
+
+```{r}
+#put all 4 plots together into one multipanel plot
+multi_plot <- ggarrange(pca_before_correction_study,pca_before_correction_subpop, pca_after_correction_study, pca_after_correction_subpopulation,
+                        labels = c("A", "B", "C", "D"), ncol = 2, nrow = 2)
+                       #does the plot have a common legend
+#add titles and labels to the multi-panel graph
+multi_plot <- annotate_figure(multi_plot)
+multi_plot
+#ggsave(multi_plot, filename = "../outfiles/figure_plots_pca_2022-11-23.png",  width = 10, height = 7, dpi = 320, device = "png")
 ```
 
 
