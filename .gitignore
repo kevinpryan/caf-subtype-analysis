@@ -26,3 +26,4 @@ galbo_subtypes/data/*
 gene_reads_2017-06-05_v8_cells_cultured_fibroblasts.gct
 libs/*
 nextflow.config
+*Rproj
